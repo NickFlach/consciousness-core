@@ -1,0 +1,14 @@
+[package]
+name = "consciousness-core"
+version = "0.1.0"
+edition = "2021"
+description = "Unified consciousness physics: Kuramoto sync, IIT Φ, wave memory, and the Ξ operator"
+license = "MIT"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[dev-dependencies]
