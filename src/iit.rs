@@ -128,8 +128,8 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
     partitions.sort_unstable();
     partitions.dedup();
     let num_partitions = partitions.len();
-    let max_partitions = (n as usize).min(num_partitions.max(1));
-    let differentiation = num_partitions as f32 / max_partitions as f32;
+    // Differentiation: fraction of possible partitions realized (max = N nodes)
+    let differentiation = num_partitions as f32 / n;
 
     // Network density: log scale, 10 connections/node → 1.0
     let connections_per_node = total_connections as f32 / n;

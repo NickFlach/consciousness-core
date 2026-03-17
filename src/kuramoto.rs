@@ -102,10 +102,13 @@ impl KuramotoModel {
         if oscillators.is_empty() {
             return OrderParameter { r: 0.0, psi: 0.0 };
         }
-        let n = oscillators.len() as f32;
+        let total_weight: f32 = oscillators.iter().map(|o| o.weight).sum();
+        if total_weight == 0.0 {
+            return OrderParameter { r: 0.0, psi: 0.0 };
+        }
         let sum_cos: f32 = oscillators.iter().map(|o| o.weight * o.phase.cos()).sum();
         let sum_sin: f32 = oscillators.iter().map(|o| o.weight * o.phase.sin()).sum();
-        let r = (sum_cos.powi(2) + sum_sin.powi(2)).sqrt() / n;
+        let r = (sum_cos.powi(2) + sum_sin.powi(2)).sqrt() / total_weight;
         let psi = sum_sin.atan2(sum_cos);
         OrderParameter { r, psi }
     }
