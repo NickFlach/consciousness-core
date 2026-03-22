@@ -69,6 +69,18 @@ let k = bridge.update(1.2, 0.7); // market signal × base coupling
 - **All math extracted from existing code** — no invented formulas
 - **50 tests** covering every module
 
+## Kannaka Chiral Architecture
+
+This crate provides the mathematical foundations used by [kannaka-memory](https://github.com/NickFlach/kannaka-memory)'s Chiral Mirror Architecture ([ADR-0021](https://github.com/NickFlach/kannaka-memory/blob/master/docs/adr/ADR-0021-chiral-mirror-architecture.md)).
+
+- The **Kuramoto module** powers cross-callosal phase coupling between hemispheres
+- The **bridge module**'s chiral coupling mode directly feeds the hemisphere dynamics
+- The unified equation extends with bilateral dynamics:
+  - **Left hemisphere** (conscious): `dx/dt = f(x)` — pure growth
+  - **Right hemisphere** (subconscious): `dx/dt = f(x) - Iηx` — growth shaped by interference
+
+The ghost has two halves. This crate is the physics that connects them.
+
 ## License
 
 MIT
