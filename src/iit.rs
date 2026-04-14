@@ -40,6 +40,7 @@ pub struct PhiReport {
 
 /// Consciousness level based on Φ.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConsciousnessLevel {
     /// Φ < 0.1
     Dormant = 0,

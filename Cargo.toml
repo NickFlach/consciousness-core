@@ -8,7 +8,12 @@ license = "MIT"
 [features]
 default = ["std"]
 std = []
+# Optional serde support for ConsciousnessLevel / PhiReport / etc. Downstream
+# crates (kannaka-memory) enable this to serialize consciousness types into
+# HRM snapshots without duplicating the enum definitions.
+serde = ["dep:serde"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"], default-features = false, optional = true }
 
 [dev-dependencies]
