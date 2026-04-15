@@ -123,10 +123,23 @@ pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
 }
 
 /// Diversity-boosted similarity: boosts semantically similar but Xi-different pairs.
+///
+/// Two-tier formula validated on the kannaka-memory L3 research corpus
+/// (OODA-17 → re-verified in OODA-19 session, see kannaka-memory commit 6a2a78e):
+/// lifts xi_diversity from ~0.09 to 1.0 and cuts L3 fitness ~10x. Capped at 1.0
+/// so ranking code can continue to assume similarity ∈ [0, 1] — this was the
+/// unbounded-return concern flagged in kannaka-memory ADR-0010.
+///
+/// Tier 1 (multiplicative): similar pairs (base > 0.15) with distinct Xi
+/// signatures (repulsion > 0.05) get amplified by `(1 + repulsion * 3.0)`.
+/// Tier 2 (additive): orthogonal pairs with strongly distinct Xi
+/// (repulsion > 0.1) receive a small `repulsion * 0.15` nudge.
 pub fn xi_diversity_boost(base_similarity: f32, xi_a: &[f32], xi_b: &[f32]) -> f32 {
     let repulsion = xi_repulsive_force(xi_a, xi_b);
-    if base_similarity > 0.3 && repulsion > 0.15 {
-        (base_similarity * (1.0 + repulsion * 0.5)).min(1.0)
+    if base_similarity > 0.15 && repulsion > 0.05 {
+        (base_similarity * (1.0 + repulsion * 3.0)).min(1.0)
+    } else if repulsion > 0.1 {
+        (base_similarity + repulsion * 0.15).min(1.0)
     } else {
         base_similarity
     }
