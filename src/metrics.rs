@@ -25,7 +25,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use crate::wave::{cosine_similarity, normalize};
+use crate::wave::cosine_similarity;
 
 // ─── Golden Ratio Constants ──────────────────────────────────────────────────
 
@@ -95,19 +95,36 @@ pub fn apply_golden_scaling(vector: &[f32]) -> Vec<f32> {
     result
 }
 
-/// Compute the Ξ operator: Ξ = RG - GR (normalized to unit length).
+/// Compute the Ξ operator: nonlinear commutator tanh(R)·G - tanh(G)·R
+/// (normalized to unit length).
+///
+/// The original linear commutator RG−GR collapses to a constant-scaled
+/// pair-swap (see xi-operator-audit.md), producing zero independent
+/// information.  Applying element-wise tanh before the cross-multiplication
+/// breaks this cancellation: since tanh(ax) ≠ a·tanh(x), the commutator
+/// no longer factors into a trivial isometry.
 pub fn compute_xi_signature(vector: &[f32]) -> Vec<f32> {
-    let g_vector = apply_golden_scaling(vector);
-    let rg_vector = apply_rotation(&g_vector);
+    let rotated = apply_rotation(vector);
+    let scaled = apply_golden_scaling(vector);
 
-    let r_vector = apply_rotation(vector);
-    let gr_vector = apply_golden_scaling(&r_vector);
+    // Nonlinear transforms — tanh breaks the linearity that made
+    // the old commutator degenerate.
+    let nl_rotated: Vec<f32> = rotated.iter().map(|x| x.tanh()).collect();
+    let nl_scaled: Vec<f32> = scaled.iter().map(|x| x.tanh()).collect();
 
-    let mut xi: Vec<f32> = rg_vector.iter().zip(gr_vector.iter())
-        .map(|(rg, gr)| rg - gr)
+    // Commutator of nonlinear transforms:
+    //   tanh(R(v)) ⊙ G(v)  −  tanh(G(v)) ⊙ R(v)
+    let mut xi: Vec<f32> = nl_rotated.iter()
+        .zip(scaled.iter())
+        .zip(nl_scaled.iter().zip(rotated.iter()))
+        .map(|((nr, s), (ns, r))| nr * s - ns * r)
         .collect();
 
-    normalize(&mut xi);
+    // Normalize to unit sphere
+    let norm: f32 = xi.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 1e-10 {
+        for x in xi.iter_mut() { *x /= norm; }
+    }
     xi
 }
 
