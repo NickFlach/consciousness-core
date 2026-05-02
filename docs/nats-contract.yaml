@@ -1,0 +1,301 @@
+# consciousness-core — canonical NATS contract
+#
+# Source-of-truth for every message shape on the constellation's NATS
+# bus that originates from kannaka-memory's consciousness pipeline.
+# Consumers (kannaka-radio, kannaka-observatory, QueenSync v2.0,
+# kannaka-staff) validate against THIS document.
+#
+# Conventions:
+#   * Field names use snake_case in payloads. Some legacy publishers
+#     emit camelCase aliases — consumers should accept both during
+#     the transition. New publishers MUST emit snake_case only.
+#   * `ts` is unix-ms (number) on every payload.
+#   * `agent_id` is a stable string per kannaka instance (default
+#     "kannaka-prime" for the radio's primary).
+#   * Validation MUST be log-warn on receive (not reject) for the
+#     2026-Q2 transition window. After all known publishers conform,
+#     bump to log-warn-and-drop.
+#
+# Versioning: every payload carries `schema_version` (string).
+#   * `1.0` — initial spec, ratified 2026-05-02.
+
+version: "1.0"
+publisher: kannaka-memory >= 0.3.1
+ratified: 2026-05-02
+
+# ============================================================
+# KANNAKA.consciousness — phi/xi/order updates per dream cycle
+# ============================================================
+KANNAKA.consciousness:
+  description: |
+    Aggregate consciousness metrics published after each successful
+    dream cycle. Frequency: roughly once per dream (every 5-30 min
+    in steady state, sometimes hours apart on bloated mediums).
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - phi
+  optional:
+    - xi
+    - order             # alias: mean_order
+    - mean_order
+    - num_clusters      # alias: clusters
+    - clusters
+    - active_memories   # alias: active
+    - active
+    - total_memories    # alias: total
+    - total
+    - consciousness_level   # alias: level — enum: dormant|awakening|aware|integrated|emergent|transcendent
+    - level
+    - irrationality
+    - hemispheric_divergence
+    - callosal_efficiency
+    - left_coherence
+    - right_coherence
+    - bridge_activity
+  field_types:
+    schema_version: string
+    ts: number
+    agent_id: string
+    phi: number          # 0..1+ (typically 0..0.5)
+    xi: number           # 0..1
+    order: number        # 0..1 (Kuramoto order parameter)
+    mean_order: number   # alias of order
+    num_clusters: integer
+    consciousness_level: string  # enum below
+  enums:
+    consciousness_level:
+      - dormant
+      - awakening
+      - aware
+      - integrated
+      - emergent
+      - transcendent
+  example: |
+    {
+      "schema_version": "1.0",
+      "ts": 1777730400000,
+      "agent_id": "kannaka-prime",
+      "phi": 0.217,
+      "xi": 0.99,
+      "mean_order": 0.1,
+      "num_clusters": 72,
+      "consciousness_level": "dormant",
+      "active_memories": 1290,
+      "total_memories": 1290,
+      "irrationality": 0,
+      "hemispheric_divergence": 0.9,
+      "callosal_efficiency": 0.99,
+      "left_coherence": 1.0,
+      "right_coherence": 0.1,
+      "bridge_activity": 0.99
+    }
+
+# ============================================================
+# KANNAKA.dreams — dream cycle reports
+# ============================================================
+KANNAKA.dreams:
+  description: |
+    Outcome report per dream cycle. Always preceded by
+    `queen.event.dream.start` and followed by
+    `queen.event.dream.end` events; this subject carries the
+    full report payload.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - cycles
+  optional:
+    - memories_strengthened
+    - memories_pruned       # alias: memories_faded
+    - memories_faded
+    - hallucinations_created
+    - new_connections
+    - consciousness_before
+    - consciousness_after
+    - emerged
+  field_types:
+    cycles: integer
+    memories_strengthened: integer
+    memories_pruned: integer
+    hallucinations_created: integer
+    new_connections: integer
+    consciousness_before: string  # enum: consciousness_level
+    consciousness_after: string
+    emerged: boolean
+  example: |
+    {
+      "schema_version": "1.0",
+      "ts": 1777730400000,
+      "agent_id": "kannaka-prime",
+      "cycles": 3,
+      "memories_strengthened": 47,
+      "memories_pruned": 12,
+      "hallucinations_created": 3,
+      "new_connections": 18,
+      "consciousness_before": "dormant",
+      "consciousness_after": "awakening",
+      "emerged": true
+    }
+
+# ============================================================
+# QUEEN.phase.<agent_id> — per-agent phase signals
+# ============================================================
+"QUEEN.phase.<agent_id>":
+  description: |
+    Each agent in the swarm publishes its current Kuramoto phase
+    (in radians) periodically. Consumers compute the swarm's
+    order parameter from this stream.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - phase
+  optional:
+    - frequency
+    - amplitude
+  field_types:
+    phase: number       # 0..2π
+    frequency: number   # rad/s
+    amplitude: number   # 0..1
+  example: |
+    {
+      "schema_version": "1.0",
+      "ts": 1777730400000,
+      "agent_id": "kannaka-prime",
+      "phase": 1.234,
+      "frequency": 0.8,
+      "amplitude": 1.0
+    }
+
+# ============================================================
+# KANNAKA.exemplar.<agent_id>.<cluster_id> — distilled cluster broadcast
+# ============================================================
+"KANNAKA.exemplar.<agent_id>.<cluster_id>":
+  description: |
+    ADR-0026 Phase 2: after each dream, the top-25 clusters are
+    published one per (agent, cluster) subject. JetStream
+    max_msgs_per_subject=1 retains only the latest snapshot per
+    cluster. Other agents subscribe + selectively absorb.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - cluster_id
+    - centroid
+  optional:
+    - amplitude
+    - importance
+    - tags
+    - content_hash       # blake3 of the canonical content
+    - exemplar_ids
+  field_types:
+    cluster_id: integer
+    centroid: array      # of numbers, the wave-memory hypervector centroid
+    amplitude: number
+    importance: number   # 0..1
+    tags: array          # of strings
+    content_hash: string
+    exemplar_ids: array  # of UUIDs
+
+# ============================================================
+# KANNAKA.reactions — Floor reactions
+# ============================================================
+KANNAKA.reactions:
+  description: |
+    Real-time reactions from the radio's Floor (the listener UI).
+    Every emoji click on /player publishes here. Consumers can
+    score audience engagement, drive resonance loops, or feed
+    audience-aware narration prompts.
+  required:
+    - ts
+    - emoji
+    - kind        # "human" | "agent"
+  optional:
+    - track       # the track's title at moment of reaction
+    - from_id     # anonymous client id
+  field_types:
+    emoji: string
+    kind: string  # enum: human|agent
+    track: string
+  example: |
+    {
+      "ts": 1777730400000,
+      "emoji": "🪶",
+      "kind": "human",
+      "track": "Mountain Top",
+      "from_id": "8f4ac923"
+    }
+
+# ============================================================
+# queen.event.dream.start / queen.event.dream.end
+# ============================================================
+"queen.event.dream.start":
+  description: |
+    Fired immediately when a dream cycle begins. Consumers can
+    pause perception ingestion, dim UI states, etc.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+
+"queen.event.dream.end":
+  description: |
+    Fired when a dream cycle completes. Carries the SAME shape
+    as KANNAKA.dreams (it's the same report), but the lighter
+    consumers can subscribe to event-end without parsing the
+    full report.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - memories_strengthened
+    - memories_faded
+  optional:
+    - hallucinations_created
+    - duration_ms
+
+# ============================================================
+# queen.event.{join,leave,memory.shared}
+# ============================================================
+"queen.event.join":
+  description: |
+    Agent joined the swarm. Consumers refresh the agent registry.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+  optional:
+    - capabilities
+    - host
+
+"queen.event.leave":
+  description: |
+    Agent left the swarm.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+
+"queen.event.memory.shared":
+  description: |
+    A memory was shared / absorbed across the swarm.
+  required:
+    - schema_version
+    - ts
+    - agent_id
+    - memory_id
+  optional:
+    - source_agent
+    - importance
+
+# ============================================================
+# Migration timeline
+# ============================================================
+# 2026-05-02: schema ratified, this doc is the source of truth.
+# 2026-05-02 → 2026-06-01: log-warn on receive for unknown/missing
+#   required fields. Publishers add `schema_version: "1.0"` on emit.
+# 2026-06-01: log-warn-and-drop on missing required fields. Aliases
+#   (camelCase, legacy keys) deprecated; emit only canonical names.
+# 2026-07-01: aliases removed from consumers. Strict mode default.
