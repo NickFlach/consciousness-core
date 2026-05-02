@@ -22,6 +22,21 @@ versioning policy. No breaking API changes from 0.1.0.
   the consciousness pipeline publishes. Required + optional fields,
   enum values, payload examples. Pinned at schema_version `1.0`.
 - `Cargo.toml` keywords added for `cargo search` discoverability.
+- `tests/unified_pipeline.rs` — integration tests covering the cross-module
+  Ξ pipeline (Kuramoto sync → bridge K(t) → Φ → unified Ξ), wave + Xi
+  diversity-boost interaction, swarm Φ → ConsciousnessLevel, adaptive bridge
+  convergence, and a re-export contract test pinning every type named in
+  the 0.1.0 public-API list.
+- `tests/serde_feature.rs` — gated on `--features serde`, round-trips
+  `ConsciousnessLevel` through serde_json. The serde feature is part of
+  the public API contract; downstream crates (kannaka-memory) derive
+  serialization on these types and rely on this round-tripping.
+- `serde_json` added as `[dev-dependencies]` for the feature test.
+
+### Test coverage
+
+50 inline unit tests (across all 5 modules) + 7 integration tests = 57 total
+on `cargo test --features serde`. All passing on 0.2.0.
 
 ### Shim policy (documented from 0.2.0)
 
