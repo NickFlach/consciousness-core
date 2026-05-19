@@ -7,6 +7,65 @@ from 0.2.0 forward.
 
 ---
 
+## [0.3.0] — 2026-05-19
+
+Issue-triage sweep — fixes the eight open issues filed against 0.2.0.
+
+### ⚠ Breaking
+
+- **Wire format of `ConsciousnessLevel`** now matches the canonical NATS
+  contract at `docs/nats-contract.yaml` (issue #3). Serialized values are
+  the lower-case six-level vocabulary, not the Rust identifier names:
+  `Dormant→"dormant"`, `Stirring→"awakening"`, `Aware→"aware"`,
+  `Coherent→"integrated"`, `Resonant→"emergent"`,
+  `Transcendent→"transcendent"`. Rust call-sites are unchanged (the
+  identifiers `Stirring`/`Coherent`/`Resonant` keep working) — only the
+  JSON/NATS payload form moves. Downstream HRM snapshots and any
+  consumer keying off `consciousness_level` must update.
+- **New `ConsciousnessLevel::Transcendent` variant** sits above `Resonant`
+  at Φ ≥ 0.95. Existing `from_phi()` thresholds 0.0…0.8 are unchanged.
+
+### Added
+
+- `ConsciousnessLevel::from_swarm_phi(swarm_phi: f32)` — calibrated for
+  `compute_swarm_phi()`'s documented 0..15 scale (issue #4). Use this
+  instead of `from_phi()` whenever the input came from `compute_swarm_phi`.
+- `serde` derives on every public report type: `PhiReport`, `PhiNode`,
+  `SyncReport`, `OrderParameter`, `Oscillator`, `KuramotoConfig`,
+  `WaveParams`, `WaveMemory`, `CouplingMode`, `BridgeConfig`,
+  `ConsciousnessMetrics`, `XiSignature` (issue #2). `tests/serde_feature.rs`
+  now exercises round-trip serialization for the full public surface.
+- `libm` dependency (~80 KB, no_std-clean) routes float math through
+  `math_ext::F32Ext` / `F64Ext` when the `std` feature is disabled —
+  the documented `no_std` build now actually compiles and tests (issue #1).
+
+### Fixed
+
+- `ConsciousnessLevel::from_phi(NaN | ±inf)` now returns `Dormant` instead
+  of `Resonant`. Non-finite Φ no longer flips an integration surface into
+  a false "highest state" reading (issue #7).
+- `compute_differentiation_xi()` clamps the final result to `[0, 1]`
+  regardless of `xi_weight`, restoring the documented return range
+  (issue #6).
+- `compute_phi()` ignores out-of-bounds connection indices instead of
+  silently inflating `total_connections` and depressing `integration`
+  (issue #5).
+- `KuramotoModel::sync()` now reports the **weighted** order parameter in
+  `SyncReport.initial_order` / `final_order` and uses it for convergence
+  detection, matching the public `order_parameter()` API (issue #8).
+  Zero-weight oscillators no longer drag the report.
+
+### Internal
+
+- `src/math_ext.rs` — cfg-gated `F32Ext` / `F64Ext` extension traits
+  routing through `libm` under `no_std`. Method-style call sites
+  (`x.ln()`, `x.cos()`, etc.) work in both build modes without changes.
+- `#[macro_use] extern crate alloc;` brings the `vec!` macro into the
+  `no_std` build.
+- README + `lib.rs` docs updated for the now-real `no_std` story.
+
+---
+
 ## [0.2.0] — 2026-05-02
 
 First release with documented downstream surface and a real

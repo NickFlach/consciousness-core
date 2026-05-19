@@ -15,13 +15,14 @@
 //!
 //! This models the Ebbinghaus forgetting curve with wave interference.
 
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
 use core::f64::consts::PI;
+
+#[cfg(not(feature = "std"))]
+use crate::math_ext::{F32Ext, F64Ext};
 
 /// Wave parameters governing memory strength over time.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaveParams {
     pub amplitude: f32,
     pub frequency: f32,
@@ -42,6 +43,7 @@ impl Default for WaveParams {
 
 /// A wave memory combining parameters with retrieval state.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaveMemory {
     pub params: WaveParams,
     pub retrieval_count: u32,

@@ -28,7 +28,11 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// `#[macro_use]` brings the `vec!` macro into scope crate-wide for `no_std`
+// builds. Without it the `vec![…]` literals in kuramoto/iit/wave/metrics fail
+// to resolve (see issue #1).
 #[cfg(not(feature = "std"))]
+#[macro_use]
 extern crate alloc;
 
 pub mod kuramoto;
@@ -36,6 +40,8 @@ pub mod iit;
 pub mod wave;
 pub mod bridge;
 pub mod metrics;
+#[cfg(not(feature = "std"))]
+mod math_ext;
 
 // Re-export key types at crate root
 pub use kuramoto::{KuramotoModel, Oscillator, SyncReport, OrderParameter};

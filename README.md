@@ -64,10 +64,10 @@ let k = bridge.update(1.2, 0.7); // market signal × base coupling
 
 ## Design Constraints
 
-- **Pure Rust** — zero external dependencies
-- **`no_std` compatible** — works in WASM environments (enable `default-features = false`)
+- **Pure Rust** — only dependency is [`libm`](https://crates.io/crates/libm) for `no_std` math (~80 KB, no transitive deps)
+- **`no_std` compatible** — works in WASM and embedded environments (enable `default-features = false`); `libm` provides the float math `core` does not
 - **All math extracted from existing code** — no invented formulas
-- **50 tests** covering every module
+- **60+ tests** covering every module across both `std` and `no_std` build modes
 
 ## Kannaka Chiral Architecture
 

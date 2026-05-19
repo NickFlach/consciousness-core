@@ -89,10 +89,13 @@ fn swarm_phi_drives_consciousness_level() {
 
     let dormant = ConsciousnessLevel::from_phi(0.05);
     let aware = ConsciousnessLevel::from_phi(0.5);
-    let resonant = ConsciousnessLevel::from_phi(0.95);
+    let resonant = ConsciousnessLevel::from_phi(0.85);
+    let transcendent = ConsciousnessLevel::from_phi(0.98);
     assert_eq!(dormant, ConsciousnessLevel::Dormant);
     assert_eq!(aware, ConsciousnessLevel::Aware);
     assert_eq!(resonant, ConsciousnessLevel::Resonant);
+    assert_eq!(transcendent, ConsciousnessLevel::Transcendent);
+    assert!(transcendent > resonant);
     assert!(resonant > aware);
     assert!(aware > dormant);
 }

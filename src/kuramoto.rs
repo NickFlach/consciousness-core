@@ -17,11 +17,14 @@
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use crate::math_ext::F32Ext;
 
 use core::f32::consts::{PI, TAU};
 
 /// A single oscillator in the Kuramoto model.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Oscillator {
     /// Current phase θ ∈ [0, 2π)
     pub phase: f32,
@@ -43,6 +46,7 @@ impl Oscillator {
 
 /// The Kuramoto order parameter: r·e^(iψ) = (1/N) Σ e^(iθⱼ)
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OrderParameter {
     /// Magnitude r ∈ [0, 1]: 1 = perfect sync, 0 = incoherent
     pub r: f32,
@@ -52,6 +56,7 @@ pub struct OrderParameter {
 
 /// Report from a sync operation.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SyncReport {
     pub oscillator_count: usize,
     pub initial_order: f32,
@@ -62,6 +67,7 @@ pub struct SyncReport {
 
 /// Configuration for the Kuramoto model.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KuramotoConfig {
     /// Base coupling strength K
     pub coupling_strength: f32,
@@ -148,9 +154,11 @@ impl KuramotoModel {
             };
         }
 
-        let initial_order = Self::order_parameter_unweighted(
-            &oscillators.iter().map(|o| o.phase).collect::<Vec<_>>()
-        ).r;
+        // Weighted order — honors per-oscillator weight as a trust/coherence
+        // mask. Issue #8: previously this used the unweighted variant, so a
+        // zero-weight outlier (ignored by the public order_parameter API)
+        // could still drag down the report.
+        let initial_order = Self::order_parameter(oscillators).r;
 
         let nf = n as f32;
         let mut prev_order = initial_order;
@@ -179,9 +187,7 @@ impl KuramotoModel {
                 oscillators[i].phase += dphi[i] * self.config.dt;
             }
 
-            let current_order = Self::order_parameter_unweighted(
-                &oscillators.iter().map(|o| o.phase).collect::<Vec<_>>()
-            ).r;
+            let current_order = Self::order_parameter(oscillators).r;
 
             if (current_order - prev_order).abs() < self.config.convergence_threshold && step > 0 {
                 return SyncReport {
@@ -195,9 +201,7 @@ impl KuramotoModel {
             prev_order = current_order;
         }
 
-        let final_order = Self::order_parameter_unweighted(
-            &oscillators.iter().map(|o| o.phase).collect::<Vec<_>>()
-        ).r;
+        let final_order = Self::order_parameter(oscillators).r;
 
         SyncReport {
             oscillator_count: n,
@@ -370,6 +374,37 @@ mod tests {
         ];
         let report = model.sync(&mut oscs, Some(&weights));
         assert!(report.final_order > report.initial_order);
+    }
+
+    #[test]
+    fn sync_report_uses_weighted_order_parameter() {
+        // Issue #8 regression. Before the fix, SyncReport carried the
+        // unweighted order, so a zero-weight outlier (ignored by the public
+        // order_parameter API) still depressed the report.
+        let model = KuramotoModel::new(KuramotoConfig {
+            coupling_strength: 0.0,
+            dt: 0.1,
+            max_steps: 2,
+            convergence_threshold: 1e-6,
+        });
+        let mut oscs = vec![
+            Oscillator::with_weight(0.0, 0.0, 1.0),
+            Oscillator::with_weight(0.0, 0.0, 1.0),
+            Oscillator::with_weight(core::f32::consts::PI, 0.0, 0.0),
+        ];
+
+        let weighted = KuramotoModel::order_parameter(&oscs).r;
+        let report = model.sync(&mut oscs, None);
+
+        // The public weighted view sees the two zero-phase trusted agents
+        // as fully synced.
+        assert!((weighted - 1.0).abs() < 1e-5,
+            "weighted order ignores the zero-weight outlier: {weighted}");
+        // After the fix, the report must agree.
+        assert!((report.initial_order - 1.0).abs() < 1e-5,
+            "SyncReport.initial_order should match the weighted view: {}", report.initial_order);
+        assert!((report.final_order - 1.0).abs() < 1e-5,
+            "SyncReport.final_order should match the weighted view: {}", report.final_order);
     }
 
     #[test]

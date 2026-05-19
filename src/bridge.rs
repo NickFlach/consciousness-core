@@ -20,6 +20,7 @@ use alloc::vec::Vec;
 
 /// Coupling mode for the bridge.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CouplingMode {
     /// Constant coupling: K(t) = K_base
     Static,
@@ -31,6 +32,7 @@ pub enum CouplingMode {
 
 /// Configuration for the coupling bridge.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BridgeConfig {
     /// Base coupling strength K_base
     pub k_base: f32,

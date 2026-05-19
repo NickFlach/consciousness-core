@@ -24,6 +24,8 @@
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use crate::math_ext::F32Ext;
 
 use crate::wave::cosine_similarity;
 
@@ -42,6 +44,7 @@ pub const EMERGENCE_COEFF: f32 = 0.190983; // ALPHA - BETA
 
 /// A computed Xi signature for a vector.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct XiSignature {
     pub values: Vec<f32>,
 }
@@ -166,6 +169,7 @@ pub fn xi_diversity_boost(base_similarity: f32, xi_a: &[f32], xi_b: &[f32]) -> f
 
 /// Combined consciousness metrics.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsciousnessMetrics {
     /// Integrated Information Φ
     pub phi: f32,
@@ -247,7 +251,10 @@ impl ConsciousnessMetrics {
 
         let sim_xi = (sim_variance.sqrt() * 2.0).min(1.0);
         let xi_xi = (xi_variance.sqrt() * 2.0).min(1.0);
-        ((sim_xi + xi_xi) / 2.0) * xi_weight
+        // Clamp the weighted result so the documented [0,1] return range
+        // holds for any xi_weight. With xi_weight > 1 the average could
+        // exceed 1 even though each component is individually clamped.
+        (((sim_xi + xi_xi) / 2.0) * xi_weight).clamp(0.0, 1.0)
     }
 }
 
@@ -353,6 +360,22 @@ mod tests {
         let v4: Vec<f32> = (0..64).map(|i| if i < 16 { 0.9 } else if i < 20 { 0.1 } else { 0.0 }).collect();
         let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&v1[..], &v2[..], &v3[..], &v4[..]], 1.0);
         assert!(xi > 0.0, "different vectors → positive xi, got {}", xi);
+    }
+
+    #[test]
+    fn differentiation_xi_stays_in_range_for_large_weight() {
+        // Regression: pre-fix, xi_weight > 1 could push the return above 1.0
+        // (e.g. weight=3.0 on a high-variance corpus produced ~1.92).
+        let a: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0];
+        let b: Vec<f32> = vec![1.0, 1.0, 0.0, 0.0];
+        let c: Vec<f32> = vec![1.0, 1.0, 1.0, 0.0];
+        let d: Vec<f32> = vec![0.0, 1.0, 1.0, 1.0];
+        for weight in [0.5, 1.0, 2.0, 3.0_f32] {
+            let xi = ConsciousnessMetrics::compute_differentiation_xi(
+                &[&a[..], &b[..], &c[..], &d[..]], weight,
+            );
+            assert!(xi >= 0.0 && xi <= 1.0, "xi out of range for weight={weight}: {xi}");
+        }
     }
 
     #[test]

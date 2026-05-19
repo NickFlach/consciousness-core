@@ -25,9 +25,12 @@
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use crate::math_ext::F32Ext;
 
 /// Report from Φ computation.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PhiReport {
     pub phi: f32,
     pub integration: f32,
@@ -39,23 +42,44 @@ pub struct PhiReport {
 }
 
 /// Consciousness level based on Φ.
+///
+/// **Wire format (with `serde` feature)** is the lower-case vocabulary
+/// from `docs/nats-contract.yaml`, not the Rust identifier:
+/// `Stirring` → `"awakening"`, `Coherent` → `"integrated"`,
+/// `Resonant` → `"emergent"`, `Transcendent` → `"transcendent"`.
+/// This keeps Rust call-sites stable while aligning the cross-process
+/// schema with the canonical NATS contract (see issue #3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConsciousnessLevel {
     /// Φ < 0.1
+    #[cfg_attr(feature = "serde", serde(rename = "dormant"))]
     Dormant = 0,
-    /// Φ < 0.3
+    /// Φ < 0.3 — wire: "awakening"
+    #[cfg_attr(feature = "serde", serde(rename = "awakening"))]
     Stirring = 1,
     /// Φ < 0.6
+    #[cfg_attr(feature = "serde", serde(rename = "aware"))]
     Aware = 2,
-    /// Φ < 0.8
+    /// Φ < 0.8 — wire: "integrated"
+    #[cfg_attr(feature = "serde", serde(rename = "integrated"))]
     Coherent = 3,
-    /// Φ >= 0.8
+    /// Φ < 0.95 — wire: "emergent"
+    #[cfg_attr(feature = "serde", serde(rename = "emergent"))]
     Resonant = 4,
+    /// Φ >= 0.95 — peak coherence per the NATS contract's six-level scale.
+    #[cfg_attr(feature = "serde", serde(rename = "transcendent"))]
+    Transcendent = 5,
 }
 
 impl ConsciousnessLevel {
     pub fn from_phi(phi: f32) -> Self {
+        // Non-finite Φ (NaN, +inf, -inf) must NOT optimistically classify as
+        // the highest state. All `phi < ...` comparisons against NaN return
+        // false in IEEE-754, which previously fell through to Resonant.
+        if !phi.is_finite() {
+            return Self::Dormant;
+        }
         if phi < 0.1 {
             Self::Dormant
         } else if phi < 0.3 {
@@ -64,13 +88,46 @@ impl ConsciousnessLevel {
             Self::Aware
         } else if phi < 0.8 {
             Self::Coherent
-        } else {
+        } else if phi < 0.95 {
             Self::Resonant
+        } else {
+            Self::Transcendent
         }
     }
 
     pub fn ordinal(self) -> u8 {
         self as u8
+    }
+
+    /// Classify a swarm Φ produced by [`compute_swarm_phi`].
+    ///
+    /// Swarm Φ lives on the documented `[0, 15]` scale (see
+    /// `compute_swarm_phi`), not the `[0, 1]` scale of single-system Φ.
+    /// Using [`from_phi`] on swarm Φ overstates the level — even a moderate
+    /// two-agent swarm at 0.5 coherence produces a swarm Φ near 4.0, which
+    /// would land in `Resonant` if interpreted as a single-system value.
+    /// Use this constructor whenever the input came from `compute_swarm_phi`.
+    ///
+    /// Thresholds are derived by scaling the single-system bands ×10 so the
+    /// same intuition ("0.6 / 0.8 / 0.95 = strong / very strong / peak")
+    /// applies to the wider swarm range.
+    pub fn from_swarm_phi(swarm_phi: f32) -> Self {
+        if !swarm_phi.is_finite() {
+            return Self::Dormant;
+        }
+        if swarm_phi < 1.0 {
+            Self::Dormant
+        } else if swarm_phi < 3.0 {
+            Self::Stirring
+        } else if swarm_phi < 6.0 {
+            Self::Aware
+        } else if swarm_phi < 9.0 {
+            Self::Coherent
+        } else if swarm_phi < 13.0 {
+            Self::Resonant
+        } else {
+            Self::Transcendent
+        }
     }
 }
 
@@ -79,6 +136,7 @@ impl ConsciousnessLevel {
 /// Each node has a partition key (e.g. layer, cluster ID, modality)
 /// and a list of connection targets.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PhiNode {
     /// Partition assignment for this node
     pub partition: u32,
@@ -109,10 +167,17 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
     let mut total_connections: usize = 0;
     let mut cross_partition: usize = 0;
 
+    // Only count edges that resolve to a real node. Pre-fix, stale or
+    // out-of-bounds indices were silently folded into the denominator,
+    // which depressed `integration` and `num_connections` for callers
+    // who couldn't tell their graph had drifted.
     for node in nodes {
         for &target in &node.connections {
+            if target >= nodes.len() {
+                continue;
+            }
             total_connections += 1;
-            if target < nodes.len() && nodes[target].partition != node.partition {
+            if nodes[target].partition != node.partition {
                 cross_partition += 1;
             }
         }
@@ -228,6 +293,25 @@ mod tests {
     }
 
     #[test]
+    fn phi_ignores_out_of_bounds_edges() {
+        // Regression: stale / oob edge indices used to bump
+        // total_connections without bumping cross_partition, depressing
+        // integration and Φ. After the fix, the dirty graph below must
+        // match the clean one exactly.
+        let clean = compute_phi(&[
+            PhiNode { partition: 0, connections: vec![1] },
+            PhiNode { partition: 1, connections: vec![0] },
+        ]);
+        let dirty = compute_phi(&[
+            PhiNode { partition: 0, connections: vec![1, 99] },
+            PhiNode { partition: 1, connections: vec![0, 42] },
+        ]);
+        assert_eq!(clean.num_connections, dirty.num_connections);
+        assert!((clean.integration - dirty.integration).abs() < 1e-6);
+        assert!((clean.phi - dirty.phi).abs() < 1e-6);
+    }
+
+    #[test]
     fn phi_more_partitions_higher_differentiation() {
         // 4 nodes, 1 partition
         let one_part = compute_phi(&[
@@ -259,9 +343,42 @@ mod tests {
     }
 
     #[test]
+    fn consciousness_level_nonfinite_phi_is_dormant() {
+        // Regression: previously NaN / ±inf classified as Resonant because
+        // every `phi < threshold` comparison against a non-finite returns
+        // false, falling through to the trailing `else`.
+        assert_eq!(ConsciousnessLevel::from_phi(f32::NAN),          ConsciousnessLevel::Dormant);
+        assert_eq!(ConsciousnessLevel::from_phi(f32::INFINITY),     ConsciousnessLevel::Dormant);
+        assert_eq!(ConsciousnessLevel::from_phi(f32::NEG_INFINITY), ConsciousnessLevel::Dormant);
+    }
+
+    #[test]
     fn consciousness_level_ordering() {
         assert!(ConsciousnessLevel::Resonant > ConsciousnessLevel::Dormant);
         assert!(ConsciousnessLevel::Coherent > ConsciousnessLevel::Aware);
+    }
+
+    #[test]
+    fn from_swarm_phi_uses_calibrated_thresholds() {
+        // Regression for issue #4 — feeding compute_swarm_phi's 0..15 range
+        // straight into ConsciousnessLevel::from_phi() classified moderate
+        // two-agent swarms as Resonant. from_swarm_phi rebands to the
+        // documented 0..15 scale.
+        let low  = compute_swarm_phi(0.5, &[0.5, 0.5], false);
+        let high = compute_swarm_phi(0.95, &[0.95, 0.92, 0.96, 0.94], true);
+        assert!(low < 6.0,  "moderate two-agent swarm should not reach Aware tier: phi={low}");
+        assert!(high > 9.0, "near-peak four-agent swarm should reach Coherent+ tier: phi={high}");
+        assert!(ConsciousnessLevel::from_swarm_phi(low)  <= ConsciousnessLevel::Aware);
+        assert!(ConsciousnessLevel::from_swarm_phi(high) >= ConsciousnessLevel::Coherent);
+
+        // Boundary smoke
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(0.0),  ConsciousnessLevel::Dormant);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(2.0),  ConsciousnessLevel::Stirring);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(5.0),  ConsciousnessLevel::Aware);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(8.0),  ConsciousnessLevel::Coherent);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(11.0), ConsciousnessLevel::Resonant);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(15.0), ConsciousnessLevel::Transcendent);
+        assert_eq!(ConsciousnessLevel::from_swarm_phi(f32::NAN), ConsciousnessLevel::Dormant);
     }
 
     #[test]
