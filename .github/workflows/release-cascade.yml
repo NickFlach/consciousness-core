@@ -1,0 +1,52 @@
+name: release cascade → kannaka-memory
+
+# Fires on every `v*` tag push and signals downstream repos that a
+# new consciousness-core is available. kannaka-memory listens for the
+# `consciousness-core-released` repository_dispatch and opens a chore
+# PR bumping its Cargo.lock; merge + tag the next kannaka patch and
+# `kannaka update` carries the new constellation physics to operators.
+#
+# Setup (one-time):
+#   1. Create a fine-scoped PAT with `contents: write` +
+#      `pull-requests: write` on NickFlach/kannaka-memory.
+#   2. Add it to this repo's secrets as `KANNAKA_CASCADE_PAT`.
+#   3. Merge this workflow. The next `v*` tag push fires the cascade.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'consciousness-core version (e.g. 0.4.0)'
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch to kannaka-memory
+        env:
+          GH_TOKEN: ${{ secrets.KANNAKA_CASCADE_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::KANNAKA_CASCADE_PAT not configured — cascade is a no-op until the secret is set."
+            exit 0
+          fi
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/NickFlach/kannaka-memory/dispatches \
+            -f event_type=consciousness-core-released \
+            -f client_payload[version]="${{ steps.v.outputs.version }}"
+          echo "Dispatched consciousness-core-released → kannaka-memory (version=${{ steps.v.outputs.version }})"
