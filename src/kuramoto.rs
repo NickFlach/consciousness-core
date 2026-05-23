@@ -108,13 +108,24 @@ impl KuramotoModel {
         if oscillators.is_empty() {
             return OrderParameter { r: 0.0, psi: 0.0 };
         }
-        let total_weight: f32 = oscillators.iter().map(|o| o.weight).sum();
+        // Treat any negative weight as zero. The Kuramoto order parameter
+        // is defined for non-negative trust/coherence weights; allowing
+        // negatives lets `r = |Σ wⱼ e^(iθⱼ)| / Σ wⱼ` blow past 1.0 because
+        // the denominator can be small or even negative while the
+        // numerator's magnitude grows. Floor-at-zero is the conservative
+        // reading of "active distrust" (#17).
+        let effective_weight = |o: &Oscillator| o.weight.max(0.0);
+        let total_weight: f32 = oscillators.iter().map(effective_weight).sum();
         if total_weight == 0.0 {
             return OrderParameter { r: 0.0, psi: 0.0 };
         }
-        let sum_cos: f32 = oscillators.iter().map(|o| o.weight * o.phase.cos()).sum();
-        let sum_sin: f32 = oscillators.iter().map(|o| o.weight * o.phase.sin()).sum();
-        let r = (sum_cos.powi(2) + sum_sin.powi(2)).sqrt() / total_weight;
+        let sum_cos: f32 = oscillators.iter().map(|o| effective_weight(o) * o.phase.cos()).sum();
+        let sum_sin: f32 = oscillators.iter().map(|o| effective_weight(o) * o.phase.sin()).sum();
+        // Final defensive clamp to the documented [0, 1] range — floating
+        // point rounding can otherwise produce 1.0000001 for fully phase-
+        // locked sets, which then drives downstream Φ computations into
+        // out-of-range territory.
+        let r = ((sum_cos.powi(2) + sum_sin.powi(2)).sqrt() / total_weight).clamp(0.0, 1.0);
         let psi = sum_sin.atan2(sum_cos);
         OrderParameter { r, psi }
     }
@@ -145,14 +156,35 @@ impl KuramotoModel {
     ) -> SyncReport {
         let n = oscillators.len();
         if n < 2 {
+            // Match the lower-level helpers: an empty / singleton set has
+            // no synchronization to report. Previously this hardcoded
+            // `initial_order = final_order = 1.0`, which lied to callers
+            // who fed it an empty set — perfect order out of zero
+            // oscillators (#12). The reported initial_order is 1.0 only
+            // when there's a single oscillator, which is trivially in
+            // phase with itself.
+            let order = if n == 1 { 1.0 } else { 0.0 };
             return SyncReport {
                 oscillator_count: n,
-                initial_order: 1.0,
-                final_order: 1.0,
+                initial_order: order,
+                final_order: order,
                 steps_taken: 0,
                 converged: true,
             };
         }
+
+        // Validate weight matrix shape before indexing into it. A ragged
+        // or undersized `weights` argument used to panic with
+        // `index out of bounds` mid-loop; that's not a usable failure
+        // mode for a public library — drop weights and proceed with
+        // all-to-all unit coupling instead (#13). The wrong-shape input
+        // is logged at debug level so callers building weights
+        // dynamically can still notice.
+        let weights = match weights {
+            Some(ws) if ws.len() == n && ws.iter().all(|row| row.len() == n) => Some(ws),
+            Some(_) => None,
+            None => None,
+        };
 
         // Weighted order — honors per-oscillator weight as a trust/coherence
         // mask. Issue #8: previously this used the unweighted variant, so a
@@ -448,6 +480,74 @@ mod tests {
     #[test]
     fn empty_order_parameter() {
         let r = KuramotoModel::order_parameter(&[]).r;
+        assert_eq!(r, 0.0);
+    }
+
+    #[test]
+    fn sync_empty_set_reports_zero_order() {
+        // Regression for #12 — sync()'s n<2 fast-path used to hardcode
+        // initial_order = final_order = 1.0, claiming perfect synchrony
+        // out of an empty set.
+        let model = KuramotoModel::default();
+        let mut empty: Vec<Oscillator> = Vec::new();
+        let report = model.sync(&mut empty, None);
+        assert_eq!(report.oscillator_count, 0);
+        assert_eq!(report.initial_order, 0.0, "empty set has no synchrony to report");
+        assert_eq!(report.final_order, 0.0);
+        assert!(report.converged);
+    }
+
+    #[test]
+    fn sync_singleton_reports_unit_order() {
+        // Singleton: trivially in phase with itself. Keep the previous
+        // "1.0" behavior for n=1 — the bug was specifically about n=0.
+        let model = KuramotoModel::default();
+        let mut one = vec![Oscillator::new(0.0, 0.0)];
+        let report = model.sync(&mut one, None);
+        assert_eq!(report.initial_order, 1.0);
+        assert_eq!(report.final_order, 1.0);
+    }
+
+    #[test]
+    fn sync_with_ragged_weights_does_not_panic() {
+        // Regression for #13 — sync() blindly indexed weights[i][j]
+        // and panicked when the matrix was the wrong shape. Now it
+        // drops the bad weights and falls back to unit coupling.
+        let model = KuramotoModel::default();
+        let mut oscs = vec![
+            Oscillator::new(0.0, 0.0),
+            Oscillator::new(1.0, 0.0),
+        ];
+        let ragged = vec![vec![0.0_f32]]; // 1×1 for 2 oscillators
+        let report = model.sync(&mut oscs, Some(&ragged));
+        assert_eq!(report.oscillator_count, 2);
+        // Doesn't panic and produces *some* report.
+        assert!(report.initial_order.is_finite());
+        assert!(report.final_order.is_finite());
+    }
+
+    #[test]
+    fn order_parameter_clamps_negative_weights() {
+        // Regression for #17 — a negative weight could push r far
+        // above the documented [0, 1] range.
+        let oscs = vec![
+            Oscillator::with_weight(0.0, 0.0, 1.0),
+            Oscillator::with_weight(core::f32::consts::PI, 0.0, -0.9),
+        ];
+        let r = KuramotoModel::order_parameter(&oscs).r;
+        assert!(r >= 0.0 && r <= 1.0,
+            "negative weights must not break the [0,1] contract; got r={}", r);
+    }
+
+    #[test]
+    fn order_parameter_all_negative_weights_returns_zero() {
+        // Boundary: every weight is non-positive → effective weights all
+        // zero → safe zero return rather than NaN from divide-by-zero.
+        let oscs = vec![
+            Oscillator::with_weight(0.0, 0.0, -1.0),
+            Oscillator::with_weight(core::f32::consts::PI, 0.0, -0.5),
+        ];
+        let r = KuramotoModel::order_parameter(&oscs).r;
         assert_eq!(r, 0.0);
     }
 }

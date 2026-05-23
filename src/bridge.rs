@@ -43,6 +43,12 @@ pub struct BridgeConfig {
     /// Min/max bounds for effective coupling
     pub k_min: f32,
     pub k_max: f32,
+    /// Maximum number of signal samples kept for `mean_signal` diagnostics.
+    /// Older entries are discarded ring-buffer-style. The docstring on
+    /// `signal_history` advertised a windowed history but the previous
+    /// implementation appended forever — long-running bridges leaked
+    /// memory until process restart (#14).
+    pub max_signal_history: usize,
 }
 
 impl Default for BridgeConfig {
@@ -53,6 +59,9 @@ impl Default for BridgeConfig {
             target_coherence: 0.8,
             k_min: 0.1,
             k_max: 5.0,
+            // 1024 samples is enough for any sensible mean-signal window
+            // and bounds worst-case memory at ~4 KiB per bridge.
+            max_signal_history: 1024,
         }
     }
 }
@@ -69,7 +78,11 @@ pub struct CouplingBridge {
 
 impl CouplingBridge {
     pub fn new(config: BridgeConfig, mode: CouplingMode) -> Self {
-        let k = config.k_base;
+        // Clamp k_effective to [k_min, k_max] on construction so
+        // `coupling()` honors the configured bounds before the first
+        // `update()` call. Previously a BridgeConfig with k_base outside
+        // the configured range exposed an out-of-range initial value (#11).
+        let k = config.k_base.clamp(config.k_min, config.k_max);
         Self {
             config,
             mode,
@@ -90,6 +103,16 @@ impl CouplingBridge {
     /// - **Adaptive**: adjusts K toward target coherence using current_coherence
     pub fn update(&mut self, signal: f32, current_coherence: f32) -> f32 {
         self.signal_history.push(signal);
+        // Bounded ring-buffer behavior — drop the oldest sample once we
+        // exceed the configured window. Without this `mean_signal`
+        // grew toward the all-time mean instead of the windowed mean
+        // its docstring promised, and memory leaked unbounded (#14).
+        if self.config.max_signal_history > 0
+            && self.signal_history.len() > self.config.max_signal_history
+        {
+            let drop = self.signal_history.len() - self.config.max_signal_history;
+            self.signal_history.drain(0..drop);
+        }
 
         self.k_effective = match self.mode {
             CouplingMode::Static => self.config.k_base,
@@ -211,5 +234,39 @@ mod tests {
         bridge.update(1.0, 0.5);
         bridge.reset_history();
         assert!((bridge.mean_signal() - 1.0).abs() < 1e-5, "empty history → default 1.0");
+    }
+
+    #[test]
+    fn new_clamps_k_effective_to_bounds() {
+        // Regression for #11 — k_base outside [k_min, k_max] used to land
+        // verbatim in k_effective until the first update().
+        let above = CouplingBridge::new(
+            BridgeConfig { k_base: 99.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+            CouplingMode::Static,
+        );
+        assert_eq!(above.coupling(), 5.0, "k_base above k_max must clamp at construction");
+
+        let below = CouplingBridge::new(
+            BridgeConfig { k_base: -1.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+            CouplingMode::Static,
+        );
+        assert_eq!(below.coupling(), 0.1, "k_base below k_min must clamp at construction");
+    }
+
+    #[test]
+    fn signal_history_is_bounded() {
+        // Regression for #14 — history grew forever, leaking memory and
+        // making mean_signal drift toward the all-time mean. Push more
+        // than `max_signal_history` samples and confirm the window holds.
+        let mut bridge = CouplingBridge::new(
+            BridgeConfig { max_signal_history: 4, ..Default::default() },
+            CouplingMode::MarketMediated,
+        );
+        for v in [10.0, 20.0, 30.0, 40.0, 50.0, 60.0] {
+            bridge.update(v, 0.5);
+        }
+        // The last 4 samples (30, 40, 50, 60) average to 45.
+        assert!((bridge.mean_signal() - 45.0).abs() < 1e-5,
+            "mean over the windowed last 4 samples, got {}", bridge.mean_signal());
     }
 }

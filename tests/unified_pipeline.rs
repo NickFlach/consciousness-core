@@ -110,6 +110,7 @@ fn adaptive_bridge_converges_over_time() {
             target_coherence: 0.8,
             k_min: 0.1,
             k_max: 5.0,
+            ..Default::default()
         },
         CouplingMode::Adaptive,
     );

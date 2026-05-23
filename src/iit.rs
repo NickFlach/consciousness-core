@@ -236,10 +236,15 @@ pub fn compute_swarm_phi(
     if n < 2 {
         return 0.0;
     }
-    let mean_coherence: f32 = coherences.iter().sum::<f32>() / n as f32;
+    // Floor each input contribution at zero before composing them so a
+    // negative order_parameter or a hostile coherence sample can't push
+    // swarm Φ below zero (#9). The documented range is [0, 15] — clamp
+    // both ends explicitly.
+    let safe_order = order_parameter.max(0.0);
+    let mean_coherence: f32 = coherences.iter().map(|c| c.max(0.0)).sum::<f32>() / n as f32;
     let chiral_boost = if has_chiral_agents { 1.15 } else { 1.0 };
-    let integration = order_parameter * mean_coherence * ((n + 1) as f32).log2();
-    (integration * 10.0 * chiral_boost).min(15.0)
+    let integration = safe_order * mean_coherence * ((n + 1) as f32).log2();
+    (integration * 10.0 * chiral_boost).clamp(0.0, 15.0)
 }
 
 /// Distribution entropy approximation using variance.
@@ -398,6 +403,24 @@ mod tests {
         let without = compute_swarm_phi(0.8, &[0.8, 0.8, 0.8], false);
         let with = compute_swarm_phi(0.8, &[0.8, 0.8, 0.8], true);
         assert!(with > without, "chiral boost: {} vs {}", with, without);
+    }
+
+    #[test]
+    fn swarm_phi_clamps_negative_inputs_to_zero() {
+        // Regression for #9 — the previous impl only `.min(15.0)`-clamped
+        // and would happily return negative Φ for negative inputs.
+        let phi = compute_swarm_phi(-0.5, &[0.8, 0.8], false);
+        assert!(phi >= 0.0, "negative order_parameter must not produce Φ < 0; got {}", phi);
+        let phi = compute_swarm_phi(0.5, &[-0.8, -0.8], false);
+        assert!(phi >= 0.0, "negative coherences must not produce Φ < 0; got {}", phi);
+    }
+
+    #[test]
+    fn swarm_phi_stays_in_15_ceiling() {
+        // Pathological all-1s inputs at maximum chiral boost should still
+        // honor the upper bound.
+        let phi = compute_swarm_phi(1.0, &[1.0; 50], true);
+        assert!(phi <= 15.0, "swarm Φ must not exceed 15.0; got {}", phi);
     }
 
     #[test]

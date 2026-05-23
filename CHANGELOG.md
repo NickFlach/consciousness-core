@@ -7,6 +7,66 @@ from 0.2.0 forward.
 
 ---
 
+## [0.4.0] — 2026-05-23
+
+Range-contract hardening sweep — closes the nine open issues filed
+against 0.3.0 (#9..#17). Every public function that documents a numeric
+range now enforces it on input AND output, and every API that could
+previously panic on hostile input fails safely instead.
+
+### Fixed
+- `compute_swarm_phi` floors negative `order_parameter` / `coherence`
+  inputs at 0 before composing them and `.clamp(0.0, 15.0)`s the result
+  on both ends. Documented range is now an enforced contract. (#9)
+- `KuramotoModel::order_parameter` treats negative oscillator weights as
+  zero (the "active distrust" reading) and `.clamp(0.0, 1.0)`s the final
+  ratio so float rounding can't push fully-locked sets to 1.0000001.
+  Previously a single negative weight could produce r=19. (#17)
+- `KuramotoModel::sync()`
+  - `n < 2` path returns order 0.0 for empty input (was hardcoded 1.0,
+    claiming perfect synchrony out of an empty set). Singleton still
+    reports 1.0 — trivially in phase with itself. (#12)
+  - Validates the `weights` matrix shape against `oscillators.len()`
+    before indexing. Mismatched shapes drop the weights and fall back
+    to unit coupling instead of panicking mid-loop with `index out of
+    bounds`. (#13)
+- `CouplingBridge::new()` clamps `k_effective` to `[k_min, k_max]` on
+  construction so `coupling()` honors the configured range before the
+  first `update()` call. (#11)
+- `BridgeConfig` gains `max_signal_history` (default 1024). `update()`
+  enforces the window — older samples are dropped ring-buffer-style so
+  `mean_signal` reflects the windowed mean its docstring promised and
+  long-running bridges no longer leak memory. (#14)
+- (Already shipped in 0.3.0 but the issues weren't closed: `compute_phi`
+  skips out-of-range connection indices instead of inflating
+  `total_connections` (#15); `ConsciousnessLevel::from_phi` and
+  `from_swarm_phi` explicitly handle non-finite Φ → `Dormant` instead of
+  falling through to `Resonant` (#16); `compute_differentiation_xi`
+  clamps the final weighted output to `[0, 1]` instead of just clamping
+  intermediate signals (#10).)
+
+### Tests
+- New regression coverage for every numeric-range fix:
+  `swarm_phi_clamps_negative_inputs_to_zero`,
+  `swarm_phi_stays_in_15_ceiling`,
+  `order_parameter_clamps_negative_weights`,
+  `order_parameter_all_negative_weights_returns_zero`,
+  `sync_empty_set_reports_zero_order`,
+  `sync_singleton_reports_unit_order`,
+  `sync_with_ragged_weights_does_not_panic`,
+  `new_clamps_k_effective_to_bounds`,
+  `signal_history_is_bounded`.
+
+Suite: 64 lib tests + 5 integration tests pass.
+
+### Migration
+`BridgeConfig` is `#[non_exhaustive]`-shaped via struct-update syntax:
+existing call sites that built it with `..Default::default()` keep
+working. Direct literals naming every field need to add
+`max_signal_history` (or switch to `..Default::default()`).
+
+---
+
 ## [0.3.0] — 2026-05-19
 
 Issue-triage sweep — fixes the eight open issues filed against 0.2.0.
