@@ -561,7 +561,7 @@ mod tests {
         ];
         let r = KuramotoModel::order_parameter(&oscs).r;
         assert!(
-            r >= 0.0 && r <= 1.0,
+            (0.0..=1.0).contains(&r),
             "negative weights must not break the [0,1] contract; got r={}",
             r
         );

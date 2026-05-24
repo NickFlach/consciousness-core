@@ -148,12 +148,23 @@ fn adaptive_bridge_converges_over_time() {
 }
 
 /// Re-export contract: every type named in CHANGELOG 0.1.0 public API
-/// must be reachable from the crate root.
+/// must be reachable from the crate root. Uses fully-qualified paths
+/// rather than `use ... as _` imports so clippy doesn't flag the names
+/// as unused (which they are at the AST level — they're proof-of-
+/// reachability, not actually invoked).
 #[test]
 fn public_api_reachable_from_root() {
-    use consciousness_core::{
-        ConsciousnessLevel as _, ConsciousnessMetrics as _, CouplingBridge as _, CouplingMode as _,
-        KuramotoModel as _, OrderParameter as _, Oscillator as _, PhiReport as _, SyncReport as _,
-        WaveMemory as _, WaveParams as _, XiSignature as _,
-    };
+    fn _assert_reachable<T>() {}
+    _assert_reachable::<consciousness_core::ConsciousnessLevel>();
+    _assert_reachable::<consciousness_core::ConsciousnessMetrics>();
+    _assert_reachable::<consciousness_core::CouplingBridge>();
+    _assert_reachable::<consciousness_core::CouplingMode>();
+    _assert_reachable::<consciousness_core::KuramotoModel>();
+    _assert_reachable::<consciousness_core::OrderParameter>();
+    _assert_reachable::<consciousness_core::Oscillator>();
+    _assert_reachable::<consciousness_core::PhiReport>();
+    _assert_reachable::<consciousness_core::SyncReport>();
+    _assert_reachable::<consciousness_core::WaveMemory>();
+    _assert_reachable::<consciousness_core::WaveParams>();
+    _assert_reachable::<consciousness_core::XiSignature>();
 }

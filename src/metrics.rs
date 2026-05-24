@@ -420,7 +420,7 @@ mod tests {
                 weight,
             );
             assert!(
-                xi >= 0.0 && xi <= 1.0,
+                (0.0..=1.0).contains(&xi),
                 "xi out of range for weight={weight}: {xi}"
             );
         }
