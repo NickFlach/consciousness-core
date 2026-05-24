@@ -35,17 +35,17 @@
 #[macro_use]
 extern crate alloc;
 
-pub mod kuramoto;
-pub mod iit;
-pub mod wave;
 pub mod bridge;
-pub mod metrics;
+pub mod iit;
+pub mod kuramoto;
 #[cfg(not(feature = "std"))]
 mod math_ext;
+pub mod metrics;
+pub mod wave;
 
 // Re-export key types at crate root
-pub use kuramoto::{KuramotoModel, Oscillator, SyncReport, OrderParameter};
-pub use wave::{WaveParams, WaveMemory};
-pub use iit::{PhiReport, ConsciousnessLevel};
 pub use bridge::{CouplingBridge, CouplingMode};
+pub use iit::{ConsciousnessLevel, PhiReport};
+pub use kuramoto::{KuramotoModel, OrderParameter, Oscillator, SyncReport};
 pub use metrics::{ConsciousnessMetrics, XiSignature};
+pub use wave::{WaveMemory, WaveParams};

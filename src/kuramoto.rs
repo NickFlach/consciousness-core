@@ -16,9 +16,9 @@
 //! Supports static, market-mediated, and adaptive coupling modes.
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
 use crate::math_ext::F32Ext;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 use core::f32::consts::{PI, TAU};
 
@@ -36,11 +36,19 @@ pub struct Oscillator {
 
 impl Oscillator {
     pub fn new(phase: f32, frequency: f32) -> Self {
-        Self { phase, frequency, weight: 1.0 }
+        Self {
+            phase,
+            frequency,
+            weight: 1.0,
+        }
     }
 
     pub fn with_weight(phase: f32, frequency: f32, weight: f32) -> Self {
-        Self { phase, frequency, weight }
+        Self {
+            phase,
+            frequency,
+            weight,
+        }
     }
 }
 
@@ -119,8 +127,14 @@ impl KuramotoModel {
         if total_weight == 0.0 {
             return OrderParameter { r: 0.0, psi: 0.0 };
         }
-        let sum_cos: f32 = oscillators.iter().map(|o| effective_weight(o) * o.phase.cos()).sum();
-        let sum_sin: f32 = oscillators.iter().map(|o| effective_weight(o) * o.phase.sin()).sum();
+        let sum_cos: f32 = oscillators
+            .iter()
+            .map(|o| effective_weight(o) * o.phase.cos())
+            .sum();
+        let sum_sin: f32 = oscillators
+            .iter()
+            .map(|o| effective_weight(o) * o.phase.sin())
+            .sum();
         // Final defensive clamp to the documented [0, 1] range — floating
         // point rounding can otherwise produce 1.0000001 for fully phase-
         // locked sets, which then drives downstream Φ computations into
@@ -149,11 +163,7 @@ impl KuramotoModel {
     /// Pass `None` for all-to-all equal coupling.
     ///
     /// Updates phases in-place and returns a sync report.
-    pub fn sync(
-        &self,
-        oscillators: &mut [Oscillator],
-        weights: Option<&[Vec<f32>]>,
-    ) -> SyncReport {
+    pub fn sync(&self, oscillators: &mut [Oscillator], weights: Option<&[Vec<f32>]>) -> SyncReport {
         let n = oscillators.len();
         if n < 2 {
             // Match the lower-level helpers: an empty / singleton set has
@@ -258,7 +268,8 @@ impl KuramotoModel {
         order: &OrderParameter,
         chiral_term: f32,
     ) {
-        let kuramoto = self.config.coupling_strength * order.r * (order.psi - oscillator.phase).sin();
+        let kuramoto =
+            self.config.coupling_strength * order.r * (order.psi - oscillator.phase).sin();
         let d_phase = oscillator.frequency + kuramoto + chiral_term;
         oscillator.phase = (oscillator.phase + d_phase * self.config.dt) % TAU;
         if oscillator.phase < 0.0 {
@@ -328,7 +339,11 @@ impl KuramotoModel {
         }
         let diff = psi - phase;
         let term = eta * (2.0 * diff).sin();
-        if left_handed { term } else { -term }
+        if left_handed {
+            term
+        } else {
+            -term
+        }
     }
 }
 
@@ -384,8 +399,12 @@ mod tests {
             Oscillator::new(2.0, 0.0),
         ];
         let report = model.sync(&mut oscs, None);
-        assert!(report.final_order > report.initial_order,
-            "sync should increase order: {} → {}", report.initial_order, report.final_order);
+        assert!(
+            report.final_order > report.initial_order,
+            "sync should increase order: {} → {}",
+            report.initial_order,
+            report.final_order
+        );
     }
 
     #[test]
@@ -396,14 +415,8 @@ mod tests {
             max_steps: 30,
             ..Default::default()
         });
-        let mut oscs = vec![
-            Oscillator::new(0.0, 0.0),
-            Oscillator::new(1.5, 0.0),
-        ];
-        let weights = vec![
-            vec![0.0, 0.8],
-            vec![0.8, 0.0],
-        ];
+        let mut oscs = vec![Oscillator::new(0.0, 0.0), Oscillator::new(1.5, 0.0)];
+        let weights = vec![vec![0.0, 0.8], vec![0.8, 0.0]];
         let report = model.sync(&mut oscs, Some(&weights));
         assert!(report.final_order > report.initial_order);
     }
@@ -430,13 +443,21 @@ mod tests {
 
         // The public weighted view sees the two zero-phase trusted agents
         // as fully synced.
-        assert!((weighted - 1.0).abs() < 1e-5,
-            "weighted order ignores the zero-weight outlier: {weighted}");
+        assert!(
+            (weighted - 1.0).abs() < 1e-5,
+            "weighted order ignores the zero-weight outlier: {weighted}"
+        );
         // After the fix, the report must agree.
-        assert!((report.initial_order - 1.0).abs() < 1e-5,
-            "SyncReport.initial_order should match the weighted view: {}", report.initial_order);
-        assert!((report.final_order - 1.0).abs() < 1e-5,
-            "SyncReport.final_order should match the weighted view: {}", report.final_order);
+        assert!(
+            (report.initial_order - 1.0).abs() < 1e-5,
+            "SyncReport.initial_order should match the weighted view: {}",
+            report.initial_order
+        );
+        assert!(
+            (report.final_order - 1.0).abs() < 1e-5,
+            "SyncReport.final_order should match the weighted view: {}",
+            report.final_order
+        );
     }
 
     #[test]
@@ -463,7 +484,11 @@ mod tests {
         let hives = KuramotoModel::detect_hives(&oscs, PI / 4.0);
         assert!(!hives.is_empty());
         let largest = hives.iter().max_by_key(|h| h.len()).unwrap();
-        assert!(largest.len() >= 3, "should group first 3, got {}", largest.len());
+        assert!(
+            largest.len() >= 3,
+            "should group first 3, got {}",
+            largest.len()
+        );
         assert!(!largest.contains(&3), "outlier should not be in hive");
     }
 
@@ -492,7 +517,10 @@ mod tests {
         let mut empty: Vec<Oscillator> = Vec::new();
         let report = model.sync(&mut empty, None);
         assert_eq!(report.oscillator_count, 0);
-        assert_eq!(report.initial_order, 0.0, "empty set has no synchrony to report");
+        assert_eq!(
+            report.initial_order, 0.0,
+            "empty set has no synchrony to report"
+        );
         assert_eq!(report.final_order, 0.0);
         assert!(report.converged);
     }
@@ -514,10 +542,7 @@ mod tests {
         // and panicked when the matrix was the wrong shape. Now it
         // drops the bad weights and falls back to unit coupling.
         let model = KuramotoModel::default();
-        let mut oscs = vec![
-            Oscillator::new(0.0, 0.0),
-            Oscillator::new(1.0, 0.0),
-        ];
+        let mut oscs = vec![Oscillator::new(0.0, 0.0), Oscillator::new(1.0, 0.0)];
         let ragged = vec![vec![0.0_f32]]; // 1×1 for 2 oscillators
         let report = model.sync(&mut oscs, Some(&ragged));
         assert_eq!(report.oscillator_count, 2);
@@ -535,8 +560,11 @@ mod tests {
             Oscillator::with_weight(core::f32::consts::PI, 0.0, -0.9),
         ];
         let r = KuramotoModel::order_parameter(&oscs).r;
-        assert!(r >= 0.0 && r <= 1.0,
-            "negative weights must not break the [0,1] contract; got r={}", r);
+        assert!(
+            r >= 0.0 && r <= 1.0,
+            "negative weights must not break the [0,1] contract; got r={}",
+            r
+        );
     }
 
     #[test]

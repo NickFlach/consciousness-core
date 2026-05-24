@@ -158,7 +158,10 @@ mod tests {
     #[test]
     fn static_mode_ignores_signal() {
         let mut bridge = CouplingBridge::new(
-            BridgeConfig { k_base: 1.0, ..Default::default() },
+            BridgeConfig {
+                k_base: 1.0,
+                ..Default::default()
+            },
             CouplingMode::Static,
         );
         let k = bridge.update(999.0, 0.5);
@@ -168,17 +171,31 @@ mod tests {
     #[test]
     fn market_mediated_scales_by_signal() {
         let mut bridge = CouplingBridge::new(
-            BridgeConfig { k_base: 1.0, k_min: 0.0, k_max: 10.0, ..Default::default() },
+            BridgeConfig {
+                k_base: 1.0,
+                k_min: 0.0,
+                k_max: 10.0,
+                ..Default::default()
+            },
             CouplingMode::MarketMediated,
         );
         let k = bridge.update(2.0, 0.5);
-        assert!((k - 2.0).abs() < 1e-5, "K = K_base × signal = 1 × 2 = 2, got {}", k);
+        assert!(
+            (k - 2.0).abs() < 1e-5,
+            "K = K_base × signal = 1 × 2 = 2, got {}",
+            k
+        );
     }
 
     #[test]
     fn market_mediated_clamped() {
         let mut bridge = CouplingBridge::new(
-            BridgeConfig { k_base: 1.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+            BridgeConfig {
+                k_base: 1.0,
+                k_min: 0.1,
+                k_max: 5.0,
+                ..Default::default()
+            },
             CouplingMode::MarketMediated,
         );
         let k = bridge.update(100.0, 0.5);
@@ -201,7 +218,12 @@ mod tests {
         );
         let initial = bridge.coupling();
         let k = bridge.update(1.0, 0.3); // coherence < target
-        assert!(k > initial, "should increase coupling when below target: {} → {}", initial, k);
+        assert!(
+            k > initial,
+            "should increase coupling when below target: {} → {}",
+            initial,
+            k
+        );
     }
 
     #[test]
@@ -217,7 +239,12 @@ mod tests {
         );
         let initial = bridge.coupling();
         let k = bridge.update(1.0, 0.9); // coherence > target
-        assert!(k < initial, "should decrease coupling when above target: {} → {}", initial, k);
+        assert!(
+            k < initial,
+            "should decrease coupling when above target: {} → {}",
+            initial,
+            k
+        );
     }
 
     #[test]
@@ -233,7 +260,10 @@ mod tests {
         let mut bridge = CouplingBridge::default();
         bridge.update(1.0, 0.5);
         bridge.reset_history();
-        assert!((bridge.mean_signal() - 1.0).abs() < 1e-5, "empty history → default 1.0");
+        assert!(
+            (bridge.mean_signal() - 1.0).abs() < 1e-5,
+            "empty history → default 1.0"
+        );
     }
 
     #[test]
@@ -241,16 +271,34 @@ mod tests {
         // Regression for #11 — k_base outside [k_min, k_max] used to land
         // verbatim in k_effective until the first update().
         let above = CouplingBridge::new(
-            BridgeConfig { k_base: 99.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+            BridgeConfig {
+                k_base: 99.0,
+                k_min: 0.1,
+                k_max: 5.0,
+                ..Default::default()
+            },
             CouplingMode::Static,
         );
-        assert_eq!(above.coupling(), 5.0, "k_base above k_max must clamp at construction");
+        assert_eq!(
+            above.coupling(),
+            5.0,
+            "k_base above k_max must clamp at construction"
+        );
 
         let below = CouplingBridge::new(
-            BridgeConfig { k_base: -1.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+            BridgeConfig {
+                k_base: -1.0,
+                k_min: 0.1,
+                k_max: 5.0,
+                ..Default::default()
+            },
             CouplingMode::Static,
         );
-        assert_eq!(below.coupling(), 0.1, "k_base below k_min must clamp at construction");
+        assert_eq!(
+            below.coupling(),
+            0.1,
+            "k_base below k_min must clamp at construction"
+        );
     }
 
     #[test]
@@ -259,14 +307,20 @@ mod tests {
         // making mean_signal drift toward the all-time mean. Push more
         // than `max_signal_history` samples and confirm the window holds.
         let mut bridge = CouplingBridge::new(
-            BridgeConfig { max_signal_history: 4, ..Default::default() },
+            BridgeConfig {
+                max_signal_history: 4,
+                ..Default::default()
+            },
             CouplingMode::MarketMediated,
         );
         for v in [10.0, 20.0, 30.0, 40.0, 50.0, 60.0] {
             bridge.update(v, 0.5);
         }
         // The last 4 samples (30, 40, 50, 60) average to 45.
-        assert!((bridge.mean_signal() - 45.0).abs() < 1e-5,
-            "mean over the windowed last 4 samples, got {}", bridge.mean_signal());
+        assert!(
+            (bridge.mean_signal() - 45.0).abs() < 1e-5,
+            "mean over the windowed last 4 samples, got {}",
+            bridge.mean_signal()
+        );
     }
 }

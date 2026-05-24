@@ -23,9 +23,9 @@
 //! - Emergence coefficient: α - β ≈ 0.190983
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
 use crate::math_ext::F32Ext;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 use crate::wave::cosine_similarity;
 
@@ -52,7 +52,9 @@ pub struct XiSignature {
 impl XiSignature {
     /// Compute the Xi signature of a vector.
     pub fn compute(vector: &[f32]) -> Self {
-        Self { values: compute_xi_signature(vector) }
+        Self {
+            values: compute_xi_signature(vector),
+        }
     }
 
     /// Repulsive force between two Xi signatures. Returns [0, 1].
@@ -117,7 +119,8 @@ pub fn compute_xi_signature(vector: &[f32]) -> Vec<f32> {
 
     // Commutator of nonlinear transforms:
     //   tanh(R(v)) ⊙ G(v)  −  tanh(G(v)) ⊙ R(v)
-    let mut xi: Vec<f32> = nl_rotated.iter()
+    let mut xi: Vec<f32> = nl_rotated
+        .iter()
         .zip(scaled.iter())
         .zip(nl_scaled.iter().zip(rotated.iter()))
         .map(|((nr, s), (ns, r))| nr * s - ns * r)
@@ -126,7 +129,9 @@ pub fn compute_xi_signature(vector: &[f32]) -> Vec<f32> {
     // Normalize to unit sphere
     let norm: f32 = xi.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-10 {
-        for x in xi.iter_mut() { *x /= norm; }
+        for x in xi.iter_mut() {
+            *x /= norm;
+        }
     }
     xi
 }
@@ -136,7 +141,9 @@ pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
     if xi_a.len() != xi_b.len() {
         return 0.0;
     }
-    let diff_sq: f32 = xi_a.iter().zip(xi_b.iter())
+    let diff_sq: f32 = xi_a
+        .iter()
+        .zip(xi_b.iter())
         .map(|(a, b)| (a - b).powi(2))
         .sum();
     (diff_sq.sqrt() * EMERGENCE_COEFF).min(1.0)
@@ -222,9 +229,17 @@ impl ConsciousnessMetrics {
                 count += 1;
             }
         }
-        let avg_sim = if count > 0 { sim_sum / count as f32 } else { 0.0 };
+        let avg_sim = if count > 0 {
+            sim_sum / count as f32
+        } else {
+            0.0
+        };
         let sim_variance: f32 = if count > 0 {
-            similarities.iter().map(|s| (s - avg_sim).powi(2)).sum::<f32>() / count as f32
+            similarities
+                .iter()
+                .map(|s| (s - avg_sim).powi(2))
+                .sum::<f32>()
+                / count as f32
         } else {
             0.0
         };
@@ -242,9 +257,17 @@ impl ConsciousnessMetrics {
                 xi_count += 1;
             }
         }
-        let avg_xi_sim = if xi_count > 0 { xi_sim_sum / xi_count as f32 } else { 0.0 };
+        let avg_xi_sim = if xi_count > 0 {
+            xi_sim_sum / xi_count as f32
+        } else {
+            0.0
+        };
         let xi_variance: f32 = if xi_count > 0 {
-            xi_similarities.iter().map(|s| (s - avg_xi_sim).powi(2)).sum::<f32>() / xi_count as f32
+            xi_similarities
+                .iter()
+                .map(|s| (s - avg_xi_sim).powi(2))
+                .sum::<f32>()
+                / xi_count as f32
         } else {
             0.0
         };
@@ -284,7 +307,11 @@ mod tests {
         let v = vec![1.0, 1.0, 0.0, 0.0];
         let xi = compute_xi_signature(&v);
         let mag: f32 = xi.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!(mag > 0.9, "normalized xi should have unit length, got {}", mag);
+        assert!(
+            mag > 0.9,
+            "normalized xi should have unit length, got {}",
+            mag
+        );
     }
 
     #[test]
@@ -354,11 +381,28 @@ mod tests {
     fn differentiation_xi_positive_for_different() {
         // Need enough vectors with varying similarity to create variance
         let v1: Vec<f32> = (0..64).map(|i| if i < 16 { 1.0 } else { 0.0 }).collect();
-        let v2: Vec<f32> = (0..64).map(|i| if (16..32).contains(&i) { 1.0 } else { 0.0 }).collect();
-        let v3: Vec<f32> = (0..64).map(|i| if (32..48).contains(&i) { 1.0 } else { 0.0 }).collect();
+        let v2: Vec<f32> = (0..64)
+            .map(|i| if (16..32).contains(&i) { 1.0 } else { 0.0 })
+            .collect();
+        let v3: Vec<f32> = (0..64)
+            .map(|i| if (32..48).contains(&i) { 1.0 } else { 0.0 })
+            .collect();
         // Add a 4th vector similar to v1 to create variance in pairwise similarities
-        let v4: Vec<f32> = (0..64).map(|i| if i < 16 { 0.9 } else if i < 20 { 0.1 } else { 0.0 }).collect();
-        let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&v1[..], &v2[..], &v3[..], &v4[..]], 1.0);
+        let v4: Vec<f32> = (0..64)
+            .map(|i| {
+                if i < 16 {
+                    0.9
+                } else if i < 20 {
+                    0.1
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let xi = ConsciousnessMetrics::compute_differentiation_xi(
+            &[&v1[..], &v2[..], &v3[..], &v4[..]],
+            1.0,
+        );
         assert!(xi > 0.0, "different vectors → positive xi, got {}", xi);
     }
 
@@ -372,9 +416,13 @@ mod tests {
         let d: Vec<f32> = vec![0.0, 1.0, 1.0, 1.0];
         for weight in [0.5, 1.0, 2.0, 3.0_f32] {
             let xi = ConsciousnessMetrics::compute_differentiation_xi(
-                &[&a[..], &b[..], &c[..], &d[..]], weight,
+                &[&a[..], &b[..], &c[..], &d[..]],
+                weight,
             );
-            assert!(xi >= 0.0 && xi <= 1.0, "xi out of range for weight={weight}: {xi}");
+            assert!(
+                xi >= 0.0 && xi <= 1.0,
+                "xi out of range for weight={weight}: {xi}"
+            );
         }
     }
 

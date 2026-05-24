@@ -28,10 +28,19 @@ fn unified_xi_pipeline_full_flow() {
         Oscillator::new(3.0, 0.1),
     ];
     let report = model.sync(&mut oscs, None);
-    assert!(report.final_order > 0.5, "should sync, r={}", report.final_order);
+    assert!(
+        report.final_order > 0.5,
+        "should sync, r={}",
+        report.final_order
+    );
 
     let mut bridge = CouplingBridge::new(
-        BridgeConfig { k_base: 1.0, k_min: 0.1, k_max: 5.0, ..Default::default() },
+        BridgeConfig {
+            k_base: 1.0,
+            k_min: 0.1,
+            k_max: 5.0,
+            ..Default::default()
+        },
         CouplingMode::MarketMediated,
     );
     let coupling = bridge.update(report.final_order, report.final_order);
@@ -56,14 +65,22 @@ fn unified_xi_pipeline_full_flow() {
     };
 
     let xi = metrics.unified_xi();
-    assert!(xi > 0.0, "unified Ξ should be positive after successful sync");
+    assert!(
+        xi > 0.0,
+        "unified Ξ should be positive after successful sync"
+    );
     assert!(xi.is_finite(), "Ξ must be finite, got {}", xi);
 }
 
 /// Wave memory + Xi signature interaction — the kannaka-memory reranker path.
 #[test]
 fn wave_strength_with_xi_diversity_boost() {
-    let params = WaveParams { amplitude: 1.0, frequency: 0.0, phase: 0.0, decay_rate: 0.001 };
+    let params = WaveParams {
+        amplitude: 1.0,
+        frequency: 0.0,
+        phase: 0.0,
+        decay_rate: 0.001,
+    };
     let s_now = compute_strength(&params, 0.0);
     let s_old = compute_strength(&params, 1000.0);
     assert!(s_now > s_old);
@@ -76,8 +93,14 @@ fn wave_strength_with_xi_diversity_boost() {
     assert!(force > 0.0, "different vectors → positive repulsion");
 
     let boosted = xi1.diversity_boost(&xi2, 0.3);
-    assert!(boosted >= 0.3, "diversity boost should not decrease similarity");
-    assert!(boosted <= 1.0, "boost must be capped at 1.0 — kannaka ADR-0010 contract");
+    assert!(
+        boosted >= 0.3,
+        "diversity boost should not decrease similarity"
+    );
+    assert!(
+        boosted <= 1.0,
+        "boost must be capped at 1.0 — kannaka ADR-0010 contract"
+    );
 }
 
 /// Swarm Φ + ConsciousnessLevel — the QueenSync mean-field readout.
@@ -129,17 +152,8 @@ fn adaptive_bridge_converges_over_time() {
 #[test]
 fn public_api_reachable_from_root() {
     use consciousness_core::{
-        ConsciousnessLevel as _,
-        ConsciousnessMetrics as _,
-        CouplingBridge as _,
-        CouplingMode as _,
-        KuramotoModel as _,
-        Oscillator as _,
-        OrderParameter as _,
-        PhiReport as _,
-        SyncReport as _,
-        WaveMemory as _,
-        WaveParams as _,
-        XiSignature as _,
+        ConsciousnessLevel as _, ConsciousnessMetrics as _, CouplingBridge as _, CouplingMode as _,
+        KuramotoModel as _, OrderParameter as _, Oscillator as _, PhiReport as _, SyncReport as _,
+        WaveMemory as _, WaveParams as _, XiSignature as _,
     };
 }

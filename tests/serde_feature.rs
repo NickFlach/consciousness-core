@@ -29,11 +29,11 @@ fn consciousness_level_wire_format_matches_nats_contract() {
     // enum, not the Rust identifier names. Three semantic renames + a new
     // transcendent variant cover the canonical schema.
     let pairs = [
-        (ConsciousnessLevel::Dormant,      "\"dormant\""),
-        (ConsciousnessLevel::Stirring,     "\"awakening\""),
-        (ConsciousnessLevel::Aware,        "\"aware\""),
-        (ConsciousnessLevel::Coherent,     "\"integrated\""),
-        (ConsciousnessLevel::Resonant,     "\"emergent\""),
+        (ConsciousnessLevel::Dormant, "\"dormant\""),
+        (ConsciousnessLevel::Stirring, "\"awakening\""),
+        (ConsciousnessLevel::Aware, "\"aware\""),
+        (ConsciousnessLevel::Coherent, "\"integrated\""),
+        (ConsciousnessLevel::Resonant, "\"emergent\""),
         (ConsciousnessLevel::Transcendent, "\"transcendent\""),
     ];
     for (level, expected_wire) in pairs {
@@ -48,8 +48,14 @@ fn consciousness_level_wire_format_matches_nats_contract() {
 fn phi_report_serde_roundtrip() {
     use consciousness_core::iit::{compute_phi, PhiNode};
     let report = compute_phi(&[
-        PhiNode { partition: 0, connections: vec![1] },
-        PhiNode { partition: 1, connections: vec![0] },
+        PhiNode {
+            partition: 0,
+            connections: vec![1],
+        },
+        PhiNode {
+            partition: 1,
+            connections: vec![0],
+        },
     ]);
     let json = serde_json::to_string(&report).expect("serialize");
     // Smoke-check that the documented fields landed in the wire form.
@@ -74,7 +80,7 @@ fn sync_report_and_order_parameter_serde() {
     assert!(o.contains("\"r\""));
     assert!(r.contains("\"converged\""));
     let _: OrderParameter = serde_json::from_str(&o).unwrap();
-    let _: SyncReport     = serde_json::from_str(&r).unwrap();
+    let _: SyncReport = serde_json::from_str(&r).unwrap();
 }
 
 #[test]
@@ -88,7 +94,7 @@ fn oscillator_serde() {
 
 #[test]
 fn wave_params_and_memory_serde() {
-    use consciousness_core::wave::{WaveParams, WaveMemory};
+    use consciousness_core::wave::{WaveMemory, WaveParams};
     let mem = WaveMemory::new(WaveParams::default());
     let json = serde_json::to_string(&mem).unwrap();
     let back: WaveMemory = serde_json::from_str(&json).unwrap();
@@ -98,7 +104,11 @@ fn wave_params_and_memory_serde() {
 #[test]
 fn coupling_mode_serde() {
     use consciousness_core::bridge::CouplingMode;
-    for m in [CouplingMode::Static, CouplingMode::MarketMediated, CouplingMode::Adaptive] {
+    for m in [
+        CouplingMode::Static,
+        CouplingMode::MarketMediated,
+        CouplingMode::Adaptive,
+    ] {
         let j = serde_json::to_string(&m).unwrap();
         let back: CouplingMode = serde_json::from_str(&j).unwrap();
         assert_eq!(m, back);
@@ -107,11 +117,15 @@ fn coupling_mode_serde() {
 
 #[test]
 fn consciousness_metrics_serde() {
-    use consciousness_core::ConsciousnessMetrics;
     use consciousness_core::iit::ConsciousnessLevel;
+    use consciousness_core::ConsciousnessMetrics;
     let m = ConsciousnessMetrics {
-        phi: 0.5, xi: 0.3, order_parameter: 0.8, coherence: 0.7,
-        coupling: 1.0, wave_strength: 0.9,
+        phi: 0.5,
+        xi: 0.3,
+        order_parameter: 0.8,
+        coherence: 0.7,
+        coupling: 1.0,
+        wave_strength: 0.9,
         level: ConsciousnessLevel::Aware,
     };
     let j = serde_json::to_string(&m).unwrap();

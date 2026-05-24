@@ -34,7 +34,7 @@ impl Default for WaveParams {
     fn default() -> Self {
         Self {
             amplitude: 1.0,
-            frequency: 0.1,   // slow oscillation
+            frequency: 0.1, // slow oscillation
             phase: 0.0,
             decay_rate: 1e-6, // very slow decay
         }
@@ -51,7 +51,10 @@ pub struct WaveMemory {
 
 impl WaveMemory {
     pub fn new(params: WaveParams) -> Self {
-        Self { params, retrieval_count: 0 }
+        Self {
+            params,
+            retrieval_count: 0,
+        }
     }
 
     /// Compute effective strength at a given age in seconds.
@@ -174,17 +177,31 @@ mod tests {
 
     #[test]
     fn retrieval_diminishing_returns() {
-        let params = WaveParams { frequency: 0.0, decay_rate: 0.0, ..Default::default() };
+        let params = WaveParams {
+            frequency: 0.0,
+            decay_rate: 0.0,
+            ..Default::default()
+        };
         let boost_low = compute_strength_with_retrieval(&params, 0.0, 10)
             - compute_strength_with_retrieval(&params, 0.0, 1);
         let boost_high = compute_strength_with_retrieval(&params, 0.0, 110)
             - compute_strength_with_retrieval(&params, 0.0, 100);
-        assert!(boost_low > boost_high, "diminishing returns: {} vs {}", boost_low, boost_high);
+        assert!(
+            boost_low > boost_high,
+            "diminishing returns: {} vs {}",
+            boost_low,
+            boost_high
+        );
     }
 
     #[test]
     fn zero_retrieval_matches_original() {
-        let params = WaveParams { frequency: 0.1, phase: 0.5, decay_rate: 0.001, ..Default::default() };
+        let params = WaveParams {
+            frequency: 0.1,
+            phase: 0.5,
+            decay_rate: 0.001,
+            ..Default::default()
+        };
         let s = compute_strength(&params, 500.0);
         let s0 = compute_strength_with_retrieval(&params, 500.0, 0);
         assert!((s - s0).abs() < 1e-6);
@@ -202,18 +219,38 @@ mod tests {
 
     #[test]
     fn interference_constructive_when_aligned() {
-        let a = WaveParams { phase: 0.0, frequency: 1.0, ..Default::default() };
-        let b = WaveParams { phase: 0.0, frequency: 1.0, ..Default::default() };
+        let a = WaveParams {
+            phase: 0.0,
+            frequency: 1.0,
+            ..Default::default()
+        };
+        let b = WaveParams {
+            phase: 0.0,
+            frequency: 1.0,
+            ..Default::default()
+        };
         let i = interference(&a, &b, 0.0);
         assert!((i - 1.0).abs() < 1e-5, "aligned → constructive, got {}", i);
     }
 
     #[test]
     fn interference_destructive_when_opposed() {
-        let a = WaveParams { phase: 0.0, frequency: 1.0, ..Default::default() };
-        let b = WaveParams { phase: core::f32::consts::PI, frequency: 1.0, ..Default::default() };
+        let a = WaveParams {
+            phase: 0.0,
+            frequency: 1.0,
+            ..Default::default()
+        };
+        let b = WaveParams {
+            phase: core::f32::consts::PI,
+            frequency: 1.0,
+            ..Default::default()
+        };
         let i = interference(&a, &b, 0.0);
-        assert!((i - (-1.0)).abs() < 1e-5, "opposed → destructive, got {}", i);
+        assert!(
+            (i - (-1.0)).abs() < 1e-5,
+            "opposed → destructive, got {}",
+            i
+        );
     }
 
     #[test]

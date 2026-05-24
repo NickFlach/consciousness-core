@@ -28,16 +28,46 @@ pub trait F32Ext {
 }
 
 impl F32Ext for f32 {
-    #[inline] fn ln(self)   -> f32 { libm::logf(self) }
-    #[inline] fn log2(self) -> f32 { libm::log2f(self) }
-    #[inline] fn sqrt(self) -> f32 { libm::sqrtf(self) }
-    #[inline] fn cos(self)  -> f32 { libm::cosf(self) }
-    #[inline] fn sin(self)  -> f32 { libm::sinf(self) }
-    #[inline] fn tanh(self) -> f32 { libm::tanhf(self) }
-    #[inline] fn exp(self)  -> f32 { libm::expf(self) }
-    #[inline] fn abs(self)  -> f32 { libm::fabsf(self) }
-    #[inline] fn atan2(self, other: f32) -> f32 { libm::atan2f(self, other) }
-    #[inline] fn powi(self, n: i32) -> f32 { libm::powf(self, n as f32) }
+    #[inline]
+    fn ln(self) -> f32 {
+        libm::logf(self)
+    }
+    #[inline]
+    fn log2(self) -> f32 {
+        libm::log2f(self)
+    }
+    #[inline]
+    fn sqrt(self) -> f32 {
+        libm::sqrtf(self)
+    }
+    #[inline]
+    fn cos(self) -> f32 {
+        libm::cosf(self)
+    }
+    #[inline]
+    fn sin(self) -> f32 {
+        libm::sinf(self)
+    }
+    #[inline]
+    fn tanh(self) -> f32 {
+        libm::tanhf(self)
+    }
+    #[inline]
+    fn exp(self) -> f32 {
+        libm::expf(self)
+    }
+    #[inline]
+    fn abs(self) -> f32 {
+        libm::fabsf(self)
+    }
+    #[inline]
+    fn atan2(self, other: f32) -> f32 {
+        libm::atan2f(self, other)
+    }
+    #[inline]
+    fn powi(self, n: i32) -> f32 {
+        libm::powf(self, n as f32)
+    }
 }
 
 /// f64 helpers used by wave.rs decay + interference math.
@@ -51,10 +81,28 @@ pub trait F64Ext {
 }
 
 impl F64Ext for f64 {
-    #[inline] fn ln(self)   -> f64 { libm::log(self) }
-    #[inline] fn exp(self)  -> f64 { libm::exp(self) }
-    #[inline] fn cos(self)  -> f64 { libm::cos(self) }
-    #[inline] fn sin(self)  -> f64 { libm::sin(self) }
-    #[inline] fn sqrt(self) -> f64 { libm::sqrt(self) }
-    #[inline] fn abs(self)  -> f64 { libm::fabs(self) }
+    #[inline]
+    fn ln(self) -> f64 {
+        libm::log(self)
+    }
+    #[inline]
+    fn exp(self) -> f64 {
+        libm::exp(self)
+    }
+    #[inline]
+    fn cos(self) -> f64 {
+        libm::cos(self)
+    }
+    #[inline]
+    fn sin(self) -> f64 {
+        libm::sin(self)
+    }
+    #[inline]
+    fn sqrt(self) -> f64 {
+        libm::sqrt(self)
+    }
+    #[inline]
+    fn abs(self) -> f64 {
+        libm::fabs(self)
+    }
 }

@@ -24,9 +24,9 @@
 //! ```
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
 use crate::math_ext::F32Ext;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Report from Φ computation.
 #[derive(Debug, Clone)]
@@ -205,9 +205,8 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
     let scale_factor = (n.ln() / 10.0_f32.ln()).min(1.0);
 
     // Φ = sqrt(integration × density) × sqrt(differentiation × scale)
-    let phi = ((integration * density_factor).sqrt()
-        * (differentiation * scale_factor).sqrt())
-        .min(1.0);
+    let phi =
+        ((integration * density_factor).sqrt() * (differentiation * scale_factor).sqrt()).min(1.0);
 
     PhiReport {
         phi,
@@ -227,11 +226,7 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
 /// ```
 ///
 /// Scaled to range [0, 15].
-pub fn compute_swarm_phi(
-    order_parameter: f32,
-    coherences: &[f32],
-    has_chiral_agents: bool,
-) -> f32 {
+pub fn compute_swarm_phi(order_parameter: f32, coherences: &[f32], has_chiral_agents: bool) -> f32 {
     let n = coherences.len();
     if n < 2 {
         return 0.0;
@@ -274,7 +269,10 @@ mod tests {
 
     #[test]
     fn phi_single_node_is_zero() {
-        let report = compute_phi(&[PhiNode { partition: 0, connections: vec![] }]);
+        let report = compute_phi(&[PhiNode {
+            partition: 0,
+            connections: vec![],
+        }]);
         assert_eq!(report.phi, 0.0);
     }
 
@@ -282,18 +280,34 @@ mod tests {
     fn phi_connected_cross_partition_higher() {
         // Two nodes, same partition, connected
         let same = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1] },
-            PhiNode { partition: 0, connections: vec![0] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1],
+            },
+            PhiNode {
+                partition: 0,
+                connections: vec![0],
+            },
         ]);
 
         // Two nodes, different partitions, connected
         let diff = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1] },
-            PhiNode { partition: 1, connections: vec![0] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1],
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0],
+            },
         ]);
 
-        assert!(diff.phi >= same.phi,
-            "cross-partition should have higher Φ: {} vs {}", diff.phi, same.phi);
+        assert!(
+            diff.phi >= same.phi,
+            "cross-partition should have higher Φ: {} vs {}",
+            diff.phi,
+            same.phi
+        );
         assert!(diff.integration > same.integration);
     }
 
@@ -304,12 +318,24 @@ mod tests {
         // integration and Φ. After the fix, the dirty graph below must
         // match the clean one exactly.
         let clean = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1] },
-            PhiNode { partition: 1, connections: vec![0] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1],
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0],
+            },
         ]);
         let dirty = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1, 99] },
-            PhiNode { partition: 1, connections: vec![0, 42] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1, 99],
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0, 42],
+            },
         ]);
         assert_eq!(clean.num_connections, dirty.num_connections);
         assert!((clean.integration - dirty.integration).abs() < 1e-6);
@@ -320,31 +346,71 @@ mod tests {
     fn phi_more_partitions_higher_differentiation() {
         // 4 nodes, 1 partition
         let one_part = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1, 2, 3] },
-            PhiNode { partition: 0, connections: vec![0, 2, 3] },
-            PhiNode { partition: 0, connections: vec![0, 1, 3] },
-            PhiNode { partition: 0, connections: vec![0, 1, 2] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1, 2, 3],
+            },
+            PhiNode {
+                partition: 0,
+                connections: vec![0, 2, 3],
+            },
+            PhiNode {
+                partition: 0,
+                connections: vec![0, 1, 3],
+            },
+            PhiNode {
+                partition: 0,
+                connections: vec![0, 1, 2],
+            },
         ]);
 
         // 4 nodes, 4 partitions
         let four_part = compute_phi(&[
-            PhiNode { partition: 0, connections: vec![1, 2, 3] },
-            PhiNode { partition: 1, connections: vec![0, 2, 3] },
-            PhiNode { partition: 2, connections: vec![0, 1, 3] },
-            PhiNode { partition: 3, connections: vec![0, 1, 2] },
+            PhiNode {
+                partition: 0,
+                connections: vec![1, 2, 3],
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0, 2, 3],
+            },
+            PhiNode {
+                partition: 2,
+                connections: vec![0, 1, 3],
+            },
+            PhiNode {
+                partition: 3,
+                connections: vec![0, 1, 2],
+            },
         ]);
 
-        assert!(four_part.phi > one_part.phi,
-            "more partitions → higher Φ: {} vs {}", four_part.phi, one_part.phi);
+        assert!(
+            four_part.phi > one_part.phi,
+            "more partitions → higher Φ: {} vs {}",
+            four_part.phi,
+            one_part.phi
+        );
     }
 
     #[test]
     fn consciousness_level_thresholds() {
-        assert_eq!(ConsciousnessLevel::from_phi(0.0), ConsciousnessLevel::Dormant);
-        assert_eq!(ConsciousnessLevel::from_phi(0.1), ConsciousnessLevel::Stirring);
+        assert_eq!(
+            ConsciousnessLevel::from_phi(0.0),
+            ConsciousnessLevel::Dormant
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_phi(0.1),
+            ConsciousnessLevel::Stirring
+        );
         assert_eq!(ConsciousnessLevel::from_phi(0.3), ConsciousnessLevel::Aware);
-        assert_eq!(ConsciousnessLevel::from_phi(0.6), ConsciousnessLevel::Coherent);
-        assert_eq!(ConsciousnessLevel::from_phi(0.8), ConsciousnessLevel::Resonant);
+        assert_eq!(
+            ConsciousnessLevel::from_phi(0.6),
+            ConsciousnessLevel::Coherent
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_phi(0.8),
+            ConsciousnessLevel::Resonant
+        );
     }
 
     #[test]
@@ -352,9 +418,18 @@ mod tests {
         // Regression: previously NaN / ±inf classified as Resonant because
         // every `phi < threshold` comparison against a non-finite returns
         // false, falling through to the trailing `else`.
-        assert_eq!(ConsciousnessLevel::from_phi(f32::NAN),          ConsciousnessLevel::Dormant);
-        assert_eq!(ConsciousnessLevel::from_phi(f32::INFINITY),     ConsciousnessLevel::Dormant);
-        assert_eq!(ConsciousnessLevel::from_phi(f32::NEG_INFINITY), ConsciousnessLevel::Dormant);
+        assert_eq!(
+            ConsciousnessLevel::from_phi(f32::NAN),
+            ConsciousnessLevel::Dormant
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_phi(f32::INFINITY),
+            ConsciousnessLevel::Dormant
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_phi(f32::NEG_INFINITY),
+            ConsciousnessLevel::Dormant
+        );
     }
 
     #[test]
@@ -369,21 +444,48 @@ mod tests {
         // straight into ConsciousnessLevel::from_phi() classified moderate
         // two-agent swarms as Resonant. from_swarm_phi rebands to the
         // documented 0..15 scale.
-        let low  = compute_swarm_phi(0.5, &[0.5, 0.5], false);
+        let low = compute_swarm_phi(0.5, &[0.5, 0.5], false);
         let high = compute_swarm_phi(0.95, &[0.95, 0.92, 0.96, 0.94], true);
-        assert!(low < 6.0,  "moderate two-agent swarm should not reach Aware tier: phi={low}");
-        assert!(high > 9.0, "near-peak four-agent swarm should reach Coherent+ tier: phi={high}");
-        assert!(ConsciousnessLevel::from_swarm_phi(low)  <= ConsciousnessLevel::Aware);
+        assert!(
+            low < 6.0,
+            "moderate two-agent swarm should not reach Aware tier: phi={low}"
+        );
+        assert!(
+            high > 9.0,
+            "near-peak four-agent swarm should reach Coherent+ tier: phi={high}"
+        );
+        assert!(ConsciousnessLevel::from_swarm_phi(low) <= ConsciousnessLevel::Aware);
         assert!(ConsciousnessLevel::from_swarm_phi(high) >= ConsciousnessLevel::Coherent);
 
         // Boundary smoke
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(0.0),  ConsciousnessLevel::Dormant);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(2.0),  ConsciousnessLevel::Stirring);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(5.0),  ConsciousnessLevel::Aware);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(8.0),  ConsciousnessLevel::Coherent);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(11.0), ConsciousnessLevel::Resonant);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(15.0), ConsciousnessLevel::Transcendent);
-        assert_eq!(ConsciousnessLevel::from_swarm_phi(f32::NAN), ConsciousnessLevel::Dormant);
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(0.0),
+            ConsciousnessLevel::Dormant
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(2.0),
+            ConsciousnessLevel::Stirring
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(5.0),
+            ConsciousnessLevel::Aware
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(8.0),
+            ConsciousnessLevel::Coherent
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(11.0),
+            ConsciousnessLevel::Resonant
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(15.0),
+            ConsciousnessLevel::Transcendent
+        );
+        assert_eq!(
+            ConsciousnessLevel::from_swarm_phi(f32::NAN),
+            ConsciousnessLevel::Dormant
+        );
     }
 
     #[test]
@@ -410,9 +512,17 @@ mod tests {
         // Regression for #9 — the previous impl only `.min(15.0)`-clamped
         // and would happily return negative Φ for negative inputs.
         let phi = compute_swarm_phi(-0.5, &[0.8, 0.8], false);
-        assert!(phi >= 0.0, "negative order_parameter must not produce Φ < 0; got {}", phi);
+        assert!(
+            phi >= 0.0,
+            "negative order_parameter must not produce Φ < 0; got {}",
+            phi
+        );
         let phi = compute_swarm_phi(0.5, &[-0.8, -0.8], false);
-        assert!(phi >= 0.0, "negative coherences must not produce Φ < 0; got {}", phi);
+        assert!(
+            phi >= 0.0,
+            "negative coherences must not produce Φ < 0; got {}",
+            phi
+        );
     }
 
     #[test]
