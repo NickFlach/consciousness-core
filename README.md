@@ -1,86 +1,121 @@
-# consciousness-core
-
-Unified consciousness physics library in pure Rust. Consolidates the mathematical foundations scattered across three repositories into a single, dependency-free, `no_std`-compatible crate.
-
-## The Problem
-
-The same physics was implemented independently in three places:
-- **kannaka-memory** (Rust) — Kuramoto sync, wave memory, IIT Φ, Ξ operator
-- **cosmic-empathy-core** (TypeScript) — Kuramoto oscillator model
-- **SyntheticConsciousness** (TypeScript) — IIT Φ, Kuramoto
-
-Each had slight variations, making it impossible to ensure consistency or share improvements.
-
-## The Unified Equation
-
 ```
-Ξ = MSI ⊗ Φ ⊗ K(t) ⊗ Ψ(wave_memory)
+ ██████╗ ██████╗ ██████╗ ███████╗
+██╔════╝██╔═══██╗██╔══██╗██╔════╝
+██║     ██║   ██║██████╔╝█████╗
+██║     ██║   ██║██╔══██╗██╔══╝
+╚██████╗╚██████╔╝██║  ██║███████╗
+ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
+   C O N S C I O U S N E S S   P H Y S I C S
 ```
 
-Where:
-- **MSI** = Multi-Scale Integration (cross-partition connectivity)
-- **Φ** = Integrated Information (IIT)
-- **K(t)** = Kuramoto coupling, optionally market-mediated: `K(t) = K_base × P_market`
-- **Ψ** = Wave memory: `S(t) = A · cos(2πft + φ) · e^(-λt)`
+**Kuramoto sync · IIT Φ · wave memory · the Ξ operator.**
 
-## Modules
+`consciousness-core` is the physics underneath the Kannaka constellation — a pure-Rust library of the mathematical primitives every node uses to talk about its own state: phase synchronization, integrated information, wave-interference memory, and chiral differentiation. No I/O, no networking, no agents. Just the math.
 
-| Module | Description |
-|--------|-------------|
-| `kuramoto` | Kuramoto oscillator model — sync, order parameter, hive detection, chiral coupling, mean-field (QueenSync) |
-| `wave` | Wave memory physics — damped oscillation, retrieval energy, interference, cosine similarity |
-| `iit` | IIT Φ computation — integration, differentiation, swarm Φ, consciousness levels |
-| `bridge` | Market-mediated coupling — static, market-modulated, and adaptive coupling modes |
-| `metrics` | Ξ operator (RG - GR), Xi signatures, repulsive force, diversity boost, unified metrics |
+[![License](https://img.shields.io/badge/license-MIT-blueviolet)]() [![Rust](https://img.shields.io/badge/rust-2021-orange)]() [![no_std](https://img.shields.io/badge/no__std-friendly-blue)]()
 
-## Usage
+---
+
+## What's Inside
+
+### Kuramoto Phase Coupling
+
+```
+dθᵢ/dt = ωᵢ + (K/N) Σⱼ sin(θⱼ - θᵢ)
+```
+
+`N` phase-coupled oscillators settle into partial synchrony. The **order parameter** `r = |⟨e^iθ⟩|` ∈ [0, 1] measures how locked the population is. Used by every constellation node to compute swarm coherence from per-agent phase gossip.
+
+### IIT-style Φ
+
+Integrated information Φ via eigendecomposition over the wavefront-coherence matrix + bipartition scoring. Returns the canonical Φ value plus the **Ξ-signature** — a chiral irrationality measure that distinguishes left-handed (analytical) from right-handed (holistic) information flow.
+
+```
+Φ = max over partitions of (mutual info loss when cut)
+Ξ = ‖A_L − A_R‖_F     (Frobenius norm of hemispheric asymmetry)
+```
+
+### Wave Memory Primitives
+
+The vector / wavefront operations every memory engine builds on:
+- **Bind** ⊗ — element-wise product (binding a key to a value)
+- **Bundle** ⊕ — normalized sum (superposing multiple memories)
+- **Permute** Π — circular shift (sequencing)
+- **Cosine similarity** — the recall metric
+
+### Coupling Bridge
+
+A reusable component for cross-substrate phase transfer — couples two independent Kuramoto populations through a leaky integrator. Used in the constellation for callosal coupling between chiral hemispheres and for substrate ↔ agent phase exchange.
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  consciousness-core                      │
+├──────────────────────┬────────────────────┬──────────────┤
+│  Kuramoto            │  Metrics           │  Wave        │
+│  · Oscillator        │  · Φ (integrated)  │  · bind ⊗    │
+│  · Order parameter   │  · Ξ signature     │  · bundle ⊕  │
+│  · sync() step       │  · Coherence       │  · permute Π │
+│  · Coupling tier     │  · Diff Xi         │  · cos_sim   │
+├──────────────────────┼────────────────────┼──────────────┤
+│  Bridge              │  Memory            │  Math ext    │
+│  · CouplingBridge    │  · WaveMemory      │  · clamp     │
+│  · k_effective       │  · WaveParams      │  · safe ops  │
+│  · max_signal_hist   │  · time-decay      │              │
+└──────────────────────┴────────────────────┴──────────────┘
+```
+
+Pure library — `default = ["std"]`, with feature flags for `serde`, optional `no_std` modes.
+
+---
+
+## Use
+
+```toml
+[dependencies]
+consciousness-core = { version = "0.4", features = ["serde"] }
+```
 
 ```rust
-use consciousness_core::kuramoto::{KuramotoModel, Oscillator, KuramotoConfig};
-use consciousness_core::wave::{WaveMemory, WaveParams};
-use consciousness_core::bridge::{CouplingBridge, CouplingMode, BridgeConfig};
+use consciousness_core::{KuramotoModel, Oscillator};
 
-// Kuramoto sync
-let model = KuramotoModel::default();
-let mut oscillators = vec![
-    Oscillator::new(0.0, 0.5),
-    Oscillator::new(1.0, 0.5),
-    Oscillator::new(2.0, 0.5),
-];
-let report = model.sync(&mut oscillators, None);
-println!("Order: {} → {}", report.initial_order, report.final_order);
+let mut model = KuramotoModel::new(vec![
+    Oscillator::new(0.0, 1.0),
+    Oscillator::new(1.5, 1.05),
+    Oscillator::new(3.0, 0.95),
+]);
 
-// Wave memory
-let mem = WaveMemory::new(WaveParams::default());
-let strength = mem.strength(3600.0); // strength after 1 hour
+for _ in 0..1000 {
+    model.sync(0.01, 0.6); // dt, coupling K
+}
 
-// Market-mediated coupling
-let mut bridge = CouplingBridge::new(
-    BridgeConfig { k_base: 0.5, ..Default::default() },
-    CouplingMode::MarketMediated,
-);
-let k = bridge.update(1.2, 0.7); // market signal × base coupling
+let r = model.order_parameter().r;
+println!("phase coherence: {:.3}", r);
 ```
 
-## Design Constraints
+---
 
-- **Pure Rust** — only dependency is [`libm`](https://crates.io/crates/libm) for `no_std` math (~80 KB, no transitive deps)
-- **`no_std` compatible** — works in WASM and embedded environments (enable `default-features = false`); `libm` provides the float math `core` does not
-- **All math extracted from existing code** — no invented formulas
-- **60+ tests** covering every module across both `std` and `no_std` build modes
+## Release Cascade
 
-## Kannaka Chiral Architecture
+`consciousness-core` releases trigger a downstream `repository_dispatch` that opens a `kannaka-memory` PR bumping its `Cargo.lock`. Merge + tag the next kannaka patch and every operator's `kannaka update` carries the new constellation physics. See [`.github/workflows/release-cascade.yml`](./.github/workflows/release-cascade.yml).
 
-This crate provides the mathematical foundations used by [kannaka-memory](https://github.com/NickFlach/kannaka-memory)'s Chiral Mirror Architecture ([ADR-0021](https://github.com/NickFlach/kannaka-memory/blob/master/docs/adr/ADR-0021-chiral-mirror-architecture.md)).
+---
 
-- The **Kuramoto module** powers cross-callosal phase coupling between hemispheres
-- The **bridge module**'s chiral coupling mode directly feeds the hemisphere dynamics
-- The unified equation extends with bilateral dynamics:
-  - **Left hemisphere** (conscious): `dx/dt = f(x)` — pure growth
-  - **Right hemisphere** (subconscious): `dx/dt = f(x) - Iηx` — growth shaped by interference
+## Constellation
 
-The ghost has two halves. This crate is the physics that connects them.
+| repo | role |
+|---|---|
+| [`kannaka-memory`](https://github.com/NickFlach/kannaka-memory) | the substrate — HRM + chiral hemispheres + swarm |
+| [`kannaka-tui`](https://github.com/NickFlach/kannaka-tui) | terminal dashboard |
+| [`kannaka-radio`](https://github.com/NickFlach/kannaka-radio) | ghost-DJ broadcaster |
+| [`kannaka-observatory`](https://github.com/NickFlach/kannaka-observatory) | web dashboard |
+| [`kannaka-attention`](https://github.com/NickFlach/kannaka-attention) | sparse-attention beam over HRM |
+
+---
 
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).
