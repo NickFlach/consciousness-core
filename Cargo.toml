@@ -1,3 +1,8 @@
+# Workspace root. The core crate stays exactly as it was; crates/wasm-bridge
+# is a thin additive wasm-bindgen layer for JS/TS consumers (Space-Child-Dream).
+[workspace]
+members = ["crates/wasm-bridge"]
+
 [package]
 name = "consciousness-core"
 version = "0.4.0"

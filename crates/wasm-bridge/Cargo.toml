@@ -1,0 +1,22 @@
+[package]
+name = "consciousness-core-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "wasm-bindgen bridge exposing consciousness-core (Kuramoto + IIT Φ) to JavaScript/TypeScript"
+license = "MIT"
+# Not published to crates.io — consumed as a wasm artifact by
+# @spacechild/consciousness-bridge (Space-Child-Dream monorepo).
+publish = false
+
+[lib]
+# cdylib for the wasm artifact, rlib so native `cargo test` works.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+consciousness-core = { path = "../.." }
+wasm-bindgen = "0.2"
+
+# Skip wasm-opt (binaryen download) — this is a thin bridge; size/speed
+# of the unoptimized artifact is already fine for the spike.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
