@@ -7,7 +7,7 @@
 //! `consciousness-core` itself, so JS and Rust consumers stay in agreement.
 
 use consciousness_core::iit::{compute_phi, PhiNode};
-use consciousness_core::kuramoto::{KuramotoConfig, KuramotoModel, Oscillator};
+use consciousness_core::kuramoto::{KuramotoConfig, KuramotoModel, OrderParameter, Oscillator};
 use wasm_bindgen::prelude::*;
 
 /// All-to-all Kuramoto network with global coupling K.
@@ -70,6 +70,29 @@ impl KuramotoNetwork {
         });
         for _ in 0..n {
             model.sync(&mut self.oscillators, None);
+        }
+    }
+
+    /// One mean-field Kuramoto step (QueenSync protocol):
+    /// `dθᵢ/dt = ωᵢ + K·r·sin(ψ − θᵢ) + chiral_term`, Euler-integrated and
+    /// wrapped to [0, 2π). Delegates to `KuramotoModel::mean_field_step` so
+    /// the math is exactly core's. The mean field (r, ψ) is computed once
+    /// from the current phases; `chiral_term` is the same scalar perturbation
+    /// applied to every oscillator (callers that need a per-oscillator chiral
+    /// term should drive `KuramotoModel::chiral_coupling` themselves).
+    ///
+    /// Unlike `step` (all-to-all), phases ARE wrapped here, matching core's
+    /// mean-field step used by the multi-agent swarm sync.
+    pub fn mean_field_step(&mut self, dt: f32, chiral_term: f32) {
+        let order: OrderParameter = KuramotoModel::order_parameter(&self.oscillators);
+        let model = KuramotoModel::new(KuramotoConfig {
+            coupling_strength: self.coupling,
+            dt,
+            max_steps: 1,
+            convergence_threshold: 0.0,
+        });
+        for osc in &mut self.oscillators {
+            model.mean_field_step(osc, &order, chiral_term);
         }
     }
 
@@ -200,6 +223,30 @@ mod tests {
         net.steps(0.1, 10);
         let phase = net.phases()[0];
         assert!((phase - 2.0).abs() < 1e-5, "θ = ω·t, got {phase}");
+    }
+
+    #[test]
+    fn mean_field_step_synchronizes_toward_field() {
+        // Two oscillators offset from a strong mean field move toward it and
+        // the order parameter rises. Phases are wrapped into [0, 2π).
+        let n = 6;
+        let freqs = vec![0.0f32; n];
+        let mut phases = evenly_spaced(n);
+        phases[0] = 0.1; // seed a slight coherence so r > 0, psi defined
+        let mut net = KuramotoNetwork::new(&freqs, &phases, 8.0).unwrap();
+        let r0 = net.order_parameter();
+        for _ in 0..200 {
+            net.mean_field_step(0.05, 0.0);
+        }
+        assert!(
+            net.order_parameter() > r0,
+            "mean-field coupling should raise order: {} → {}",
+            r0,
+            net.order_parameter()
+        );
+        for &p in net.phases().iter() {
+            assert!((0.0..TAU).contains(&p), "phase wrapped into [0,2π): {p}");
+        }
     }
 
     #[test]
