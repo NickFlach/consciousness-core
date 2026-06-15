@@ -94,7 +94,7 @@ pub fn compute_strength_with_retrieval(
     let a = params.amplitude as f64 + retrieval_energy;
     let f = params.frequency as f64;
     let phi = params.phase as f64;
-    let lambda = params.decay_rate as f64;
+    let lambda = (params.decay_rate as f64).max(0.0);
 
     let wave = (2.0 * PI * f * age_seconds + phi).cos();
     let decay = (-lambda * age_seconds).exp();
@@ -119,7 +119,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 {
+    if !na.is_finite() || !nb.is_finite() || na == 0.0 || nb == 0.0 {
         return 0.0;
     }
     dot / (na * nb)
