@@ -152,7 +152,7 @@ impl KuramotoModel {
         let n = phases.len() as f32;
         let sum_cos: f32 = phases.iter().map(|p| p.cos()).sum();
         let sum_sin: f32 = phases.iter().map(|p| p.sin()).sum();
-        let r = ((sum_cos / n).powi(2) + (sum_sin / n).powi(2)).sqrt();
+        let r = ((sum_cos / n).powi(2) + (sum_sin / n).powi(2)).sqrt().clamp(0.0, 1.0);
         let psi = sum_sin.atan2(sum_cos);
         OrderParameter { r, psi }
     }
