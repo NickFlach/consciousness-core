@@ -122,7 +122,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if !na.is_finite() || !nb.is_finite() || na == 0.0 || nb == 0.0 {
         return 0.0;
     }
-    dot / (na * nb)
+    // f32 accumulation rounding can push the result a few ULPs above 1.0
+    // (or below -1.0) for identical vectors in certain dimensions (e.g. dim=32).
+    // Clamp to the mathematically correct [-1, 1] range so downstream code that
+    // assumes similarity ∈ [-1, 1] (ADR-0010 contract) is never violated.
+    (dot / (na * nb)).clamp(-1.0, 1.0)
 }
 
 /// Normalize a vector to unit length in-place.

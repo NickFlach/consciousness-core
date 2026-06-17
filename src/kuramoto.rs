@@ -291,7 +291,16 @@ impl KuramotoModel {
         let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
         for i in 0..n {
             for j in (i + 1)..n {
-                let mut diff = (oscillators[i].phase - oscillators[j].phase).abs();
+                // rem_euclid normalises the raw difference to [0, TAU) before
+                // the PI-fold, so oscillators whose phases have drifted outside
+                // [0, 2π) (e.g. initial conditions set by callers, or
+                // accumulation before `mean_field_step` wraps them) still
+                // produce a valid circular distance in [0, π].  Without this,
+                // `TAU - diff` can go negative for |diff| > TAU, which makes
+                // every pair look like neighbours (negative diff < threshold).
+                let mut diff = (oscillators[i].phase - oscillators[j].phase)
+                    .abs()
+                    .rem_euclid(TAU);
                 if diff > PI {
                     diff = TAU - diff;
                 }
