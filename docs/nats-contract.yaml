@@ -306,7 +306,7 @@ KANNAKA.reactions:
 #
 # ── 2026-07-01 AUDIT — reality check: BOTH milestones SLIPPED ──────────
 # The 2026-06-01 and 2026-07-01 milestones did NOT land. Verified state
-# of the bus as of 2026-07-01 (kannaka-memory issue tracks the cleanup):
+# of the bus as of 2026-07-01 (tracked: kannaka-memory issue #468):
 #
 #   PUBLISHER — kannaka-memory src/openclaw.rs::publish_consciousness_to_nats
 #     still emits BOTH the canonical field AND its legacy alias on
