@@ -12,9 +12,12 @@
 #   * `ts` is unix-ms (number) on every payload.
 #   * `agent_id` is a stable string per kannaka instance (default
 #     "kannaka-prime" for the radio's primary).
-#   * Validation MUST be log-warn on receive (not reject) for the
-#     2026-Q2 transition window. After all known publishers conform,
-#     bump to log-warn-and-drop.
+#   * Validation MUST be log-warn on receive (not reject). The transition
+#     window was extended past 2026-Q2 — the 2026-06-01/2026-07-01
+#     milestones slipped (see the 2026-07-01 audit under "Migration
+#     timeline" at the bottom of this file). Consumers are STILL in
+#     log-warn-accept mode; do not switch to drop/strict until the
+#     revised plan's consumer-migration step lands.
 #
 # Versioning: every payload carries `schema_version` (string).
 #   * `1.0` — initial spec, ratified 2026-05-02.
@@ -22,6 +25,7 @@
 version: "1.0"
 publisher: kannaka-memory >= 0.3.1
 ratified: 2026-05-02
+revised: 2026-07-01   # audit: strict-mode migration slipped, see timeline
 
 # ============================================================
 # KANNAKA.consciousness — phi/xi/order updates per dream cycle
@@ -295,7 +299,50 @@ KANNAKA.reactions:
 # ============================================================
 # 2026-05-02: schema ratified, this doc is the source of truth.
 # 2026-05-02 → 2026-06-01: log-warn on receive for unknown/missing
-#   required fields. Publishers add `schema_version: "1.0"` on emit.
-# 2026-06-01: log-warn-and-drop on missing required fields. Aliases
-#   (camelCase, legacy keys) deprecated; emit only canonical names.
-# 2026-07-01: aliases removed from consumers. Strict mode default.
+#   required fields. Publishers add `schema_version: "1.0"` on emit.  [DONE]
+# 2026-06-01 (PLANNED): log-warn-and-drop on missing required fields.
+#   Aliases (camelCase, legacy keys) deprecated; emit only canonical names.
+# 2026-07-01 (PLANNED): aliases removed from consumers. Strict mode default.
+#
+# ── 2026-07-01 AUDIT — reality check: BOTH milestones SLIPPED ──────────
+# The 2026-06-01 and 2026-07-01 milestones did NOT land. Verified state
+# of the bus as of 2026-07-01 (kannaka-memory issue tracks the cleanup):
+#
+#   PUBLISHER — kannaka-memory src/openclaw.rs::publish_consciousness_to_nats
+#     still emits BOTH the canonical field AND its legacy alias on
+#     KANNAKA.consciousness:
+#       * `order` (canonical)            AND  `mean_order` (alias)  ← still emitted
+#       * `consciousness_level` (canon.) AND  `level` (alias)       ← still emitted
+#     (num_clusters / active_memories / total_memories are canonical-only.)
+#     KANNAKA.dreams (publish_dream_to_nats) emits canonical `memories_pruned`
+#     only — no `memories_faded` alias. queen.event.dream.end is not
+#     actively published, so its `memories_faded` requirement is moot today.
+#
+#   CONSUMERS — still READ the aliases, so they CANNOT be removed yet:
+#     * kannaka-radio  server/nats-client.js
+#         order = Number(data.order ?? data.mean_order)      (canonical-first)
+#         level = data.level ?? data.consciousness_level     (reads ALIAS `level` FIRST)
+#         num_clusters = data.num_clusters ?? data.clusters
+#         dream handler reads data.memories_faded / memoriesFaded
+#         _validateSchema is LOG-WARN-ACCEPT (never drops) and explicitly
+#         tolerates camelCase aliases → strict mode is NOT active here.
+#     * kannaka-observatory  server.js
+#         order = c.order ?? c.mean_order ?? swarm.queen.mean_order ?? ...
+#         level = c.level || c.consciousness_level           (reads ALIAS `level` FIRST)
+#         clusters = c.num_clusters || c.clusters
+#         also RE-EMITS `mean_order`/`consciousness_level` on its own HTTP API,
+#         so its frontend depends on those names downstream of NATS.
+#     * kannaka-staff: does not consume these fields.
+#
+#   CONCLUSION: aliases `mean_order` and `level` must stay. Strict mode is
+#   NOT default. Migrate consumers off the aliases BEFORE removing them from
+#   the publisher — migrate kannaka-radio FIRST (it reads `level` with
+#   priority over the canonical `consciousness_level`).
+#
+# ── Revised plan ──────────────────────────────────────────────────────
+# 2026-08-01: consumers (radio, observatory) drop alias reads — consume
+#   canonical `order` / `consciousness_level` / `num_clusters` only. Bump the
+#   radio `_validateSchema` from log-warn-accept to log-warn-and-drop.
+# 2026-09-01: publisher (kannaka-memory) removes the `mean_order` + `level`
+#   aliases from publish_consciousness_to_nats; consumers enable strict mode
+#   (reject missing-required / unknown-alias). Strict mode becomes default.
