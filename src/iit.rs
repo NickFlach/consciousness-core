@@ -167,15 +167,25 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
     let mut total_connections: usize = 0;
     let mut cross_partition: usize = 0;
 
-    // Only count edges that resolve to a real node. Pre-fix, stale or
-    // out-of-bounds indices were silently folded into the denominator,
-    // which depressed `integration` and `num_connections` for callers
-    // who couldn't tell their graph had drifted.
-    for node in nodes {
-        for &target in &node.connections {
-            if target >= nodes.len() {
-                continue;
-            }
+    // Normalize each node's edge list before counting: drop self-loops and
+    // collapse duplicate targets, and only count edges that resolve to a
+    // real node. Pre-fix, stale/out-of-bounds indices were silently folded
+    // into the denominator, which depressed `integration` and
+    // `num_connections` (kept here); and raw duplicate edges or self-loops
+    // inflated `total_connections` (density) — and could skew
+    // `integration` — letting malformed graph input overstate Φ without any
+    // genuine new inter-node structure (#20). A self-loop (`target == i`)
+    // never crosses a partition, so it only ever pads the denominator.
+    for (i, node) in nodes.iter().enumerate() {
+        let mut targets: Vec<usize> = node
+            .connections
+            .iter()
+            .copied()
+            .filter(|&target| target != i && target < nodes.len())
+            .collect();
+        targets.sort_unstable();
+        targets.dedup();
+        for target in targets {
             total_connections += 1;
             if nodes[target].partition != node.partition {
                 cross_partition += 1;
@@ -229,6 +239,14 @@ pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
 pub fn compute_swarm_phi(order_parameter: f32, coherences: &[f32], has_chiral_agents: bool) -> f32 {
     let n = coherences.len();
     if n < 2 {
+        return 0.0;
+    }
+    // Reject non-finite inputs outright (#21). The `.max(0.0)` flooring
+    // below neutralizes NaN and negatives, but a `+∞` order_parameter or
+    // coherence survives `max` and then `.clamp(0.0, 15.0)` promotes it to
+    // the MAXIMUM swarm Φ of 15.0 — exactly backwards. A broken measurement
+    // must read as zero consciousness, not peak.
+    if !order_parameter.is_finite() || coherences.iter().any(|c| !c.is_finite()) {
         return 0.0;
     }
     // Floor each input contribution at zero before composing them so a
@@ -531,6 +549,67 @@ mod tests {
         // honor the upper bound.
         let phi = compute_swarm_phi(1.0, &[1.0; 50], true);
         assert!(phi <= 15.0, "swarm Φ must not exceed 15.0; got {}", phi);
+    }
+
+    #[test]
+    fn swarm_phi_non_finite_inputs_return_zero() {
+        // Regression for #21 — non-finite inputs used to be promoted to the
+        // MAXIMUM swarm Φ (15.0): .max(0.0) neutralizes NaN/negatives but a
+        // +∞ order_parameter or coherence survived it, and .clamp(0.0, 15.0)
+        // then pinned it at the ceiling. A broken measurement must read as
+        // zero, never peak consciousness.
+        assert_eq!(compute_swarm_phi(f32::NAN, &[0.9, 0.9], false), 0.0);
+        assert_eq!(compute_swarm_phi(f32::INFINITY, &[0.9, 0.9], false), 0.0);
+        assert_eq!(
+            compute_swarm_phi(f32::NEG_INFINITY, &[0.9, 0.9], false),
+            0.0
+        );
+        assert_eq!(compute_swarm_phi(0.8, &[0.9, f32::NAN], false), 0.0);
+        assert_eq!(compute_swarm_phi(0.8, &[0.9, f32::INFINITY], false), 0.0);
+        assert_eq!(
+            compute_swarm_phi(0.8, &[0.9, f32::NEG_INFINITY], false),
+            0.0
+        );
+        // A finite, valid swarm is unaffected by the guard.
+        assert!(compute_swarm_phi(0.9, &[0.9, 0.9], false) > 0.0);
+    }
+
+    #[test]
+    fn phi_ignores_duplicate_edges_and_self_loops() {
+        // Regression for #20 — duplicate targets and self-loops used to bump
+        // total_connections (and could skew integration), letting malformed
+        // graph input inflate Φ with no genuine new inter-node structure.
+        // The dirty graph must now match the equivalent simple graph exactly
+        // and never exceed it.
+        let clean = compute_phi(&[
+            PhiNode {
+                partition: 0,
+                connections: vec![1],
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0],
+            },
+        ]);
+        let dirty = compute_phi(&[
+            PhiNode {
+                partition: 0,
+                connections: vec![1, 1, 0], // duplicate edge + self-loop
+            },
+            PhiNode {
+                partition: 1,
+                connections: vec![0, 0, 1], // duplicate edge + self-loop
+            },
+        ]);
+        assert_eq!(clean.num_connections, dirty.num_connections);
+        assert!((clean.integration - dirty.integration).abs() < 1e-6);
+        assert!((clean.phi - dirty.phi).abs() < 1e-6);
+        assert!(
+            dirty.phi <= clean.phi + 1e-6,
+            "self-loops/duplicates must not inflate Φ: clean={} dirty={}",
+            clean.phi,
+            dirty.phi
+        );
     }
 
     #[test]

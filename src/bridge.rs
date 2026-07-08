@@ -102,16 +102,25 @@ impl CouplingBridge {
     /// - **MarketMediated**: K(t) = K_base × signal, clamped to [k_min, k_max]
     /// - **Adaptive**: adjusts K toward target coherence using current_coherence
     pub fn update(&mut self, signal: f32, current_coherence: f32) -> f32 {
-        self.signal_history.push(signal);
-        // Bounded ring-buffer behavior — drop the oldest sample once we
-        // exceed the configured window. Without this `mean_signal`
-        // grew toward the all-time mean instead of the windowed mean
-        // its docstring promised, and memory leaked unbounded (#14).
-        if self.config.max_signal_history > 0
-            && self.signal_history.len() > self.config.max_signal_history
-        {
-            let drop = self.signal_history.len() - self.config.max_signal_history;
-            self.signal_history.drain(0..drop);
+        // Only record finite signals (#22). update() used to append the raw
+        // signal before branching on mode, so a single non-finite sample
+        // made mean_signal() return NaN forever — even in Static mode, which
+        // is documented to ignore signals entirely. Diagnostics now stay
+        // finite regardless of garbage input; an all-invalid history simply
+        // collapses to the neutral 1.0 mean_signal() already returns when
+        // empty.
+        if signal.is_finite() {
+            self.signal_history.push(signal);
+            // Bounded ring-buffer behavior — drop the oldest sample once we
+            // exceed the configured window. Without this `mean_signal`
+            // grew toward the all-time mean instead of the windowed mean
+            // its docstring promised, and memory leaked unbounded (#14).
+            if self.config.max_signal_history > 0
+                && self.signal_history.len() > self.config.max_signal_history
+            {
+                let drop = self.signal_history.len() - self.config.max_signal_history;
+                self.signal_history.drain(0..drop);
+            }
         }
 
         self.k_effective = match self.mode {
@@ -120,9 +129,25 @@ impl CouplingBridge {
                 (self.config.k_base * signal).clamp(self.config.k_min, self.config.k_max)
             }
             CouplingMode::Adaptive => {
-                let error = self.config.target_coherence - current_coherence;
-                let new_k = self.k_effective + self.config.adaptive_rate * error;
-                new_k.clamp(self.config.k_min, self.config.k_max)
+                // Reject a non-finite coherence sample (#19). Without this, a
+                // single NaN current_coherence makes `error`, then `new_k`,
+                // NaN; f32::clamp preserves NaN, so k_effective would stay
+                // NaN permanently and every later valid update would build on
+                // the poisoned value. Hold the last good coupling on invalid
+                // input (falling back to k_base if k_effective itself was
+                // somehow corrupted) so the bridge can recover.
+                let safe_prev = if self.k_effective.is_finite() {
+                    self.k_effective
+                } else {
+                    self.config.k_base
+                };
+                if current_coherence.is_finite() {
+                    let error = self.config.target_coherence - current_coherence;
+                    (safe_prev + self.config.adaptive_rate * error)
+                        .clamp(self.config.k_min, self.config.k_max)
+                } else {
+                    safe_prev.clamp(self.config.k_min, self.config.k_max)
+                }
             }
         };
 
@@ -298,6 +323,91 @@ mod tests {
             below.coupling(),
             0.1,
             "k_base below k_min must clamp at construction"
+        );
+    }
+
+    #[test]
+    fn adaptive_recovers_from_non_finite_coherence() {
+        // Regression for #19 — a single NaN coherence made error → new_k →
+        // NaN, and f32::clamp preserves NaN, so k_effective stayed NaN
+        // permanently. Now a non-finite coherence holds the last good
+        // coupling and later valid updates recover.
+        let mut bridge = CouplingBridge::new(
+            BridgeConfig {
+                k_base: 1.0,
+                adaptive_rate: 0.1,
+                target_coherence: 0.8,
+                ..Default::default()
+            },
+            CouplingMode::Adaptive,
+        );
+        let first = bridge.update(1.0, f32::NAN);
+        assert!(
+            first.is_finite(),
+            "NaN coherence must not poison coupling: {first}"
+        );
+        let second = bridge.update(1.0, 0.3);
+        assert!(
+            second.is_finite(),
+            "coupling must recover after a valid update: {second}"
+        );
+        assert!(bridge.coupling().is_finite());
+    }
+
+    #[test]
+    fn adaptive_holds_coupling_on_non_finite_coherence() {
+        // A non-finite coherence should freeze coupling at its last good
+        // value rather than drift (#19).
+        let mut bridge = CouplingBridge::new(
+            BridgeConfig {
+                k_base: 1.0,
+                adaptive_rate: 0.1,
+                target_coherence: 0.8,
+                ..Default::default()
+            },
+            CouplingMode::Adaptive,
+        );
+        let before = bridge.coupling();
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let k = bridge.update(1.0, bad);
+            assert!(
+                (k - before).abs() < 1e-6,
+                "coupling should hold on coherence {bad}: {before} → {k}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_mode_stays_diagnostically_finite() {
+        // Regression for #22 — update() recorded the raw signal before
+        // branching on mode, so a NaN signal poisoned mean_signal() even
+        // though Static mode ignores signals for coupling. Non-finite
+        // signals are no longer stored.
+        let mut bridge = CouplingBridge::new(BridgeConfig::default(), CouplingMode::Static);
+        let k = bridge.update(f32::NAN, 0.5);
+        assert!(k.is_finite(), "static coupling stays finite: {k}");
+        assert!(
+            bridge.mean_signal().is_finite(),
+            "mean_signal must ignore non-finite signals; got {}",
+            bridge.mean_signal()
+        );
+        // A NaN-only history collapses to the neutral empty-history default.
+        assert!((bridge.mean_signal() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn mean_signal_skips_non_finite_samples() {
+        // A finite sample interleaved with garbage still averages cleanly
+        // over just the finite samples (#22).
+        let mut bridge = CouplingBridge::new(BridgeConfig::default(), CouplingMode::MarketMediated);
+        bridge.update(2.0, 0.5);
+        bridge.update(f32::NAN, 0.5);
+        bridge.update(4.0, 0.5);
+        bridge.update(f32::INFINITY, 0.5);
+        assert!(
+            (bridge.mean_signal() - 3.0).abs() < 1e-5,
+            "mean over finite samples 2 and 4 = 3, got {}",
+            bridge.mean_signal()
         );
     }
 
