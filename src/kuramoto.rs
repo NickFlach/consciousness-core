@@ -122,17 +122,33 @@ impl KuramotoModel {
         // the denominator can be small or even negative while the
         // numerator's magnitude grows. Floor-at-zero is the conservative
         // reading of "active distrust" (#17).
+        //
+        // Additionally drop any oscillator whose phase or weight is
+        // non-finite before it reaches the weighted sums (#23). A single
+        // NaN/±inf phase (via `phase.cos()`) or weight would otherwise
+        // poison `sum_cos`/`sum_sin`/`total_weight` and return `r = NaN`,
+        // violating the documented `r ∈ [0, 1]` contract. NaN weights were
+        // already neutralized by the `max(0.0)` above, but +inf weights and
+        // any non-finite phase were not. Invalid oscillators contribute
+        // nothing rather than corrupting the whole metric.
+        let is_finite = |o: &Oscillator| o.phase.is_finite() && o.weight.is_finite();
         let effective_weight = |o: &Oscillator| o.weight.max(0.0);
-        let total_weight: f32 = oscillators.iter().map(effective_weight).sum();
+        let total_weight: f32 = oscillators
+            .iter()
+            .filter(|o| is_finite(o))
+            .map(effective_weight)
+            .sum();
         if total_weight == 0.0 {
             return OrderParameter { r: 0.0, psi: 0.0 };
         }
         let sum_cos: f32 = oscillators
             .iter()
+            .filter(|o| is_finite(o))
             .map(|o| effective_weight(o) * o.phase.cos())
             .sum();
         let sum_sin: f32 = oscillators
             .iter()
+            .filter(|o| is_finite(o))
             .map(|o| effective_weight(o) * o.phase.sin())
             .sum();
         // Final defensive clamp to the documented [0, 1] range — floating
@@ -588,5 +604,59 @@ mod tests {
         ];
         let r = KuramotoModel::order_parameter(&oscs).r;
         assert_eq!(r, 0.0);
+    }
+
+    #[test]
+    fn order_parameter_rejects_non_finite_phase() {
+        // Regression for #23 — a single NaN/±inf phase used to poison the
+        // weighted sums (via phase.cos()/sin()) and return r = NaN, breaking
+        // the documented r ∈ [0, 1] contract. Non-finite oscillators are now
+        // excluded from the metric entirely.
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let oscs = vec![
+                Oscillator::with_weight(bad, 0.0, 1.0),
+                Oscillator::with_weight(0.0, 0.0, 1.0),
+            ];
+            let op = KuramotoModel::order_parameter(&oscs);
+            assert!(
+                op.r.is_finite() && (0.0..=1.0).contains(&op.r),
+                "non-finite phase {bad} must not poison r; got {}",
+                op.r
+            );
+            assert!(op.psi.is_finite(), "psi must stay finite for phase {bad}");
+        }
+    }
+
+    #[test]
+    fn order_parameter_rejects_non_finite_weight() {
+        // Regression for #23 — NaN/±inf weights are dropped rather than
+        // corrupting total_weight or the weighted sums. NaN was already
+        // neutralized by the #17 max(0.0) flooring; +inf was not (it
+        // survived max() and blew up the denominator).
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let oscs = vec![
+                Oscillator::with_weight(0.0, 0.0, bad),
+                Oscillator::with_weight(0.0, 0.0, 1.0),
+            ];
+            let op = KuramotoModel::order_parameter(&oscs);
+            assert!(
+                op.r.is_finite() && (0.0..=1.0).contains(&op.r),
+                "non-finite weight {bad} must not poison r; got {}",
+                op.r
+            );
+        }
+    }
+
+    #[test]
+    fn order_parameter_all_non_finite_returns_zero() {
+        // Every oscillator invalid → effective total weight zero → safe 0.0,
+        // never NaN (#23).
+        let oscs = vec![
+            Oscillator::with_weight(f32::NAN, 0.0, 1.0),
+            Oscillator::with_weight(0.0, 0.0, f32::INFINITY),
+        ];
+        let op = KuramotoModel::order_parameter(&oscs);
+        assert_eq!(op.r, 0.0);
+        assert_eq!(op.psi, 0.0);
     }
 }
