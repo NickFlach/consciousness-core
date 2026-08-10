@@ -96,6 +96,17 @@ pub fn compute_strength_with_retrieval(
     let phi = params.phase as f64;
     let lambda = (params.decay_rate as f64).max(0.0);
 
+    // Floor the age at zero (#52). `exp(-λt)` with a negative `t` is a
+    // growth term, so a future timestamp or a little clock skew used to
+    // make a memory *stronger* than its base amplitude — at age -100s with
+    // λ=0.01 the decay factor came out as e ≈ 2.718 instead of ≤ 1. A
+    // not-yet-born memory reads as brand new, never as super-charged.
+    let age_seconds = if age_seconds.is_nan() {
+        0.0
+    } else {
+        age_seconds.max(0.0)
+    };
+
     let wave = (2.0 * PI * f * age_seconds + phi).cos();
     let decay = (-lambda * age_seconds).exp();
     (a * wave * decay) as f32
@@ -219,6 +230,39 @@ mod tests {
         wm.record_retrieval();
         let s1 = wm.strength(0.0);
         assert!(s1 > s0);
+    }
+
+    #[test]
+    fn future_timestamps_do_not_amplify_strength() {
+        // Regression for #52 — exp(-λt) with a negative t is a growth
+        // term, so a future timestamp or a little clock skew made a memory
+        // *stronger* than its base amplitude (age -100s with λ=0.01 gave
+        // 2.718 instead of ≤ 1.0).
+        let params = WaveParams {
+            amplitude: 1.0,
+            frequency: 0.0,
+            phase: 0.0,
+            decay_rate: 0.01,
+        };
+        let baseline = compute_strength(&params, 0.0);
+        for age in [-1.0, -100.0, -86_400.0] {
+            let s = compute_strength(&params, age);
+            assert!(
+                s <= baseline + 1e-6,
+                "future age {age} must not exceed the age-0 baseline {baseline}; got {s}"
+            );
+            assert!((s - baseline).abs() < 1e-6, "future age reads as age 0");
+        }
+        // Retrieval energy rides along the same floor.
+        let boosted = compute_strength_with_retrieval(&params, -500.0, 10);
+        let at_zero = compute_strength_with_retrieval(&params, 0.0, 10);
+        assert!((boosted - at_zero).abs() < 1e-6);
+    }
+
+    #[test]
+    fn nan_age_does_not_produce_nan_strength() {
+        let params = WaveParams::default();
+        assert!(compute_strength(&params, f64::NAN).is_finite());
     }
 
     #[test]

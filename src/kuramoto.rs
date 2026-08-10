@@ -98,6 +98,22 @@ impl Default for KuramotoConfig {
     }
 }
 
+/// Fold a phase back into the documented `[0, 2π)` range.
+///
+/// Non-finite input is returned untouched — callers quarantine those
+/// rather than silently mapping them onto a real angle.
+fn wrap_phase(phase: f32) -> f32 {
+    if !phase.is_finite() {
+        return phase;
+    }
+    let wrapped = phase % TAU;
+    if wrapped < 0.0 {
+        wrapped + TAU
+    } else {
+        wrapped
+    }
+}
+
 /// The Kuramoto synchronization model.
 pub struct KuramotoModel {
     pub config: KuramotoConfig,
@@ -220,6 +236,20 @@ impl KuramotoModel {
         // could still drag down the report.
         let initial_order = Self::order_parameter(oscillators).r;
 
+        // Quarantine oscillators carrying non-finite state (#58). A single
+        // NaN/±inf phase or frequency used to poison the whole round: it
+        // reaches every peer through `sin(phases[j] - phases[i])`, turns
+        // every `dphi` into NaN, and overwrites the healthy oscillators'
+        // phases on the very first Euler step. Invalid oscillators are now
+        // excluded from both sides of the coupling sum and are never
+        // integrated, so their bad value stays visible to the caller
+        // instead of spreading. `order_parameter` already filters them out
+        // of the reported metric.
+        let valid: Vec<bool> = oscillators
+            .iter()
+            .map(|o| o.phase.is_finite() && o.frequency.is_finite())
+            .collect();
+
         let nf = n as f32;
         let mut prev_order = initial_order;
 
@@ -229,22 +259,36 @@ impl KuramotoModel {
 
             let mut dphi = vec![0.0f32; n];
             for i in 0..n {
+                if !valid[i] {
+                    continue;
+                }
                 let mut coupling_sum = 0.0f32;
                 for j in 0..n {
-                    if i != j {
+                    if i != j && valid[j] {
                         let w = match weights {
                             Some(ws) => ws[i][j],
                             None => 1.0,
                         };
-                        coupling_sum += w * (phases[j] - phases[i]).sin();
+                        // A non-finite matrix entry is as poisonous as a
+                        // non-finite phase; treat it as "no coupling".
+                        if w.is_finite() {
+                            coupling_sum += w * (phases[j] - phases[i]).sin();
+                        }
                     }
                 }
                 dphi[i] = freqs[i] + (self.config.coupling_strength / nf) * coupling_sum;
             }
 
-            // Euler integration
+            // Euler integration, then fold the phase back into [0, TAU).
+            // `sin`/`cos` are 2π-periodic so wrapping changes no dynamics,
+            // but without it raw accumulation walks past the documented
+            // `θ ∈ [0, 2π)` contract that `QUEEN.phase.*` publishes and
+            // that `mean_field_step` already honors (#62).
             for i in 0..n {
-                oscillators[i].phase += dphi[i] * self.config.dt;
+                if !valid[i] {
+                    continue;
+                }
+                oscillators[i].phase = wrap_phase(oscillators[i].phase + dphi[i] * self.config.dt);
             }
 
             let current_order = Self::order_parameter(oscillators).r;
@@ -289,10 +333,7 @@ impl KuramotoModel {
         let kuramoto =
             self.config.coupling_strength * order.r * (order.psi - oscillator.phase).sin();
         let d_phase = oscillator.frequency + kuramoto + chiral_term;
-        oscillator.phase = (oscillator.phase + d_phase * self.config.dt) % TAU;
-        if oscillator.phase < 0.0 {
-            oscillator.phase += TAU;
-        }
+        oscillator.phase = wrap_phase(oscillator.phase + d_phase * self.config.dt);
     }
 
     /// Detect hives (clusters of phase-locked oscillators).
@@ -645,6 +686,103 @@ mod tests {
                 op.r
             );
         }
+    }
+
+    #[test]
+    fn sync_quarantines_non_finite_phase_from_healthy_peers() {
+        // Regression for #58 — one NaN phase used to reach every peer
+        // through sin(phases[j] - phases[i]), turn every dphi into NaN, and
+        // overwrite the healthy oscillators on the first Euler step.
+        let model = KuramotoModel::new(KuramotoConfig {
+            coupling_strength: 1.0,
+            dt: 0.1,
+            max_steps: 3,
+            convergence_threshold: 1e-6,
+        });
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut oscs = vec![
+                Oscillator::new(0.0, 0.0),
+                Oscillator::new(bad, 0.0),
+                Oscillator::new(1.0, 0.0),
+            ];
+            let report = model.sync(&mut oscs, None);
+            assert!(
+                oscs[0].phase.is_finite() && oscs[2].phase.is_finite(),
+                "healthy peers must survive a {bad} neighbour: {:?}",
+                oscs.iter().map(|o| o.phase).collect::<Vec<_>>()
+            );
+            assert!(
+                report.initial_order.is_finite() && report.final_order.is_finite(),
+                "SyncReport must stay finite alongside a {bad} oscillator"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_quarantines_non_finite_frequency() {
+        // A non-finite *frequency* poisons dphi just as surely as a
+        // non-finite phase, and it survived the phase-only filter (#58).
+        let model = KuramotoModel::default();
+        let mut oscs = vec![
+            Oscillator::new(0.0, 0.0),
+            Oscillator::new(0.5, f32::NAN),
+            Oscillator::new(1.0, 0.0),
+        ];
+        model.sync(&mut oscs, None);
+        assert!(oscs[0].phase.is_finite() && oscs[2].phase.is_finite());
+    }
+
+    #[test]
+    fn sync_leaves_phases_wrapped_into_tau_range() {
+        // Regression for #62 — raw Euler accumulation walked phases well
+        // past TAU (the issue reported 9.23 rad), breaking the documented
+        // `θ ∈ [0, 2π)` contract that QUEEN.phase.* publishes and that
+        // mean_field_step already honored.
+        let model = KuramotoModel::new(KuramotoConfig {
+            coupling_strength: 0.0,
+            dt: 1.0,
+            max_steps: 3,
+            convergence_threshold: 0.0,
+        });
+        let mut oscs = vec![
+            Oscillator::new(TAU - 0.05, 1.0),
+            Oscillator::new(0.10, 1.0),
+            // Negative drift must land in range too, not at -0.3.
+            Oscillator::new(0.1, -2.0),
+        ];
+        model.sync(&mut oscs, None);
+        for (i, o) in oscs.iter().enumerate() {
+            assert!(
+                (0.0..TAU).contains(&o.phase),
+                "osc[{i}].phase must be wrapped into [0, TAU); got {}",
+                o.phase
+            );
+        }
+    }
+
+    #[test]
+    fn wrapping_does_not_change_reported_order() {
+        // sin/cos are 2π-periodic, so folding the phase is a no-op for the
+        // order parameter. This pins that the #62 wrap did not silently
+        // alter the physics the report describes.
+        let model = KuramotoModel::new(KuramotoConfig {
+            coupling_strength: 2.0,
+            dt: 0.1,
+            max_steps: 50,
+            convergence_threshold: 1e-6,
+        });
+        let mut oscs = vec![
+            Oscillator::new(0.0, 0.0),
+            Oscillator::new(1.0, 0.0),
+            Oscillator::new(2.0, 0.0),
+        ];
+        let report = model.sync(&mut oscs, None);
+        assert!(
+            report.final_order > report.initial_order,
+            "sync still converges after wrapping: {} → {}",
+            report.initial_order,
+            report.final_order
+        );
     }
 
     #[test]

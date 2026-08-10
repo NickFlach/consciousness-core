@@ -147,6 +147,39 @@ fn adaptive_bridge_converges_over_time() {
     assert!(k_trace.last().unwrap() <= &5.0);
 }
 
+/// The README's "Use" snippet, verbatim. The previous example did not
+/// compile against any version of this API — it called
+/// `KuramotoModel::new(vec![...])` and `model.sync(dt, k)`, neither of
+/// which exist. Keeping the snippet as a test means it cannot drift again.
+#[test]
+fn readme_kuramoto_example_compiles() {
+    use consciousness_core::kuramoto::KuramotoConfig;
+    use consciousness_core::{KuramotoModel, Oscillator};
+
+    let model = KuramotoModel::new(KuramotoConfig {
+        coupling_strength: 0.6,
+        dt: 0.01,
+        max_steps: 1000,
+        ..Default::default()
+    });
+
+    let mut oscillators = vec![
+        Oscillator::new(0.0, 1.0),
+        Oscillator::new(1.5, 1.05),
+        Oscillator::new(3.0, 0.95),
+    ];
+
+    let report = model.sync(&mut oscillators, None);
+    let r = KuramotoModel::order_parameter(&oscillators).r;
+
+    assert!((0.0..=1.0).contains(&report.final_order));
+    assert!((0.0..=1.0).contains(&r));
+    // The README also promises sync() returns phases wrapped into [0, 2π).
+    for osc in &oscillators {
+        assert!((0.0..core::f32::consts::TAU).contains(&osc.phase));
+    }
+}
+
 /// Re-export contract: every type named in CHANGELOG 0.1.0 public API
 /// must be reachable from the crate root. Uses fully-qualified paths
 /// rather than `use ... as _` imports so clippy doesn't flag the names

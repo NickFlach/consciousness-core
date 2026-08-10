@@ -163,13 +163,20 @@ pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
 /// (repulsion > 0.1) receive a small `repulsion * 0.15` nudge.
 pub fn xi_diversity_boost(base_similarity: f32, xi_a: &[f32], xi_b: &[f32]) -> f32 {
     let repulsion = xi_repulsive_force(xi_a, xi_b);
-    if base_similarity > 0.15 && repulsion > 0.05 {
-        (base_similarity * (1.0 + repulsion * 3.0)).min(1.0)
+    let boosted = if base_similarity > 0.15 && repulsion > 0.05 {
+        base_similarity * (1.0 + repulsion * 3.0)
     } else if repulsion > 0.1 {
-        (base_similarity + repulsion * 0.15).min(1.0)
+        base_similarity + repulsion * 0.15
     } else {
         base_similarity
-    }
+    };
+    // Clamp BOTH ends, not just the ceiling (#54). `cosine_similarity`
+    // legitimately returns down to -1.0 for opposed vectors, and the old
+    // `.min(1.0)` let that negative fall straight through — so a helper
+    // documented as "similarity ∈ [0, 1]" handed ranking code a -1.0.
+    // Opposed vectors are "not similar"; the floor is 0, not a negative
+    // score that inverts ordering heuristics downstream.
+    boosted.clamp(0.0, 1.0)
 }
 
 // ─── Consciousness Metrics ───────────────────────────────────────────────────
@@ -424,6 +431,52 @@ mod tests {
                 "xi out of range for weight={weight}: {xi}"
             );
         }
+    }
+
+    #[test]
+    fn diversity_boost_never_returns_negative() {
+        // Regression for #54 — the helper is documented as returning a
+        // similarity ranking code can treat as [0, 1], but it only had a
+        // `.min(1.0)` ceiling. Opposed vectors give cosine_similarity()
+        // -1.0, which fell straight through and could invert ordering
+        // heuristics downstream.
+        let a = vec![1.0f32, 0.0, 0.0, 0.0];
+        let b = vec![-1.0f32, 0.0, 0.0, 0.0];
+        let base = crate::wave::cosine_similarity(&a, &b);
+        assert!((base - (-1.0)).abs() < 1e-6, "precondition: opposed → -1.0");
+
+        let xa = XiSignature::compute(&a);
+        let xb = XiSignature::compute(&b);
+        let boosted = xa.diversity_boost(&xb, base);
+        assert!(
+            (0.0..=1.0).contains(&boosted),
+            "diversity boost must stay in [0, 1]; got {boosted}"
+        );
+
+        // Sweep the whole legal cosine range through both tiers.
+        for base in [-1.0, -0.5, -0.01, 0.0, 0.2, 0.9, 1.0_f32] {
+            let out = xi_diversity_boost(base, &xa.values, &xb.values);
+            assert!(
+                (0.0..=1.0).contains(&out),
+                "out of range for base={base}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn diversity_boost_still_amplifies_similar_but_distinct_pairs() {
+        // The #54 clamp must not flatten the tier-1 amplification it was
+        // added around.
+        let a = vec![1.0f32, 0.0, 0.0, 0.0];
+        let b = vec![0.0f32, 1.0, 0.0, 0.0];
+        let xa = XiSignature::compute(&a);
+        let xb = XiSignature::compute(&b);
+        let base = 0.5;
+        let boosted = xi_diversity_boost(base, &xa.values, &xb.values);
+        assert!(
+            boosted >= base,
+            "distinct Xi signatures should not lose their boost: {base} → {boosted}"
+        );
     }
 
     #[test]

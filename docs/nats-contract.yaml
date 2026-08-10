@@ -213,19 +213,24 @@ KANNAKA.reactions:
     score audience engagement, drive resonance loops, or feed
     audience-aware narration prompts.
   required:
+    - schema_version
     - ts
+    - agent_id
     - emoji
     - kind        # "human" | "agent"
   optional:
     - track       # the track's title at moment of reaction
-    - from_id     # anonymous client id
+    - from_id     # anonymous per-session client id for crowd dots —
+                  # NOT the stable publisher identity (that is agent_id)
   field_types:
     emoji: string
     kind: string  # enum: human|agent
     track: string
   example: |
     {
+      "schema_version": "1.0",
       "ts": 1777730400000,
+      "agent_id": "kannaka-prime",
       "emoji": "🪶",
       "kind": "human",
       "track": "Mountain Top",
@@ -247,17 +252,24 @@ KANNAKA.reactions:
 "queen.event.dream.end":
   description: |
     Fired when a dream cycle completes. Carries the SAME shape
-    as KANNAKA.dreams (it's the same report), but the lighter
-    consumers can subscribe to event-end without parsing the
-    full report.
+    as KANNAKA.dreams (it's the same report) — identical required
+    and optional fields, plus an extra optional `duration_ms`.
+    Lighter consumers can subscribe to event-end and read only the
+    fields they need without parsing the full report.
   required:
     - schema_version
     - ts
     - agent_id
-    - memories_strengthened
-    - memories_faded
+    - cycles
   optional:
+    - memories_strengthened
+    - memories_pruned       # alias: memories_faded
+    - memories_faded        # deprecated alias of memories_pruned
     - hallucinations_created
+    - new_connections
+    - consciousness_before
+    - consciousness_after
+    - emerged
     - duration_ms
 
 # ============================================================
