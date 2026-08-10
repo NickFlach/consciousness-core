@@ -73,10 +73,36 @@ pub enum ConsciousnessLevel {
 }
 
 impl ConsciousnessLevel {
+    /// Classify a single-system Φ on the `[0, 1]` scale.
+    ///
+    /// Bands: `< 0.1` Dormant, `< 0.3` Stirring, `< 0.6` Aware,
+    /// `< 0.8` Coherent, `< 0.95` Resonant, otherwise Transcendent.
+    ///
+    /// For swarm Φ use [`Self::from_swarm_phi`] — that value lives on a
+    /// `[0, 15]` scale and running it through here overstates the level.
+    ///
+    /// # Non-finite input
+    ///
+    /// **NaN, `+inf` and `-inf` all classify as [`Dormant`](Self::Dormant).**
+    /// This is a guaranteed part of the contract, not an accident of the
+    /// comparison chain — rely on it.
+    ///
+    /// The natural implementation gets this exactly backwards. Every
+    /// `phi < threshold` comparison against NaN is false under IEEE-754, so
+    /// a bare `if/else if` ladder falls through to its trailing `else` and
+    /// reports a broken measurement as the *highest* consciousness state.
+    /// Downstream consumers frequently keep only the enum label and discard
+    /// the float, so that misclassification is unrecoverable once it
+    /// escapes.
+    ///
+    /// `Dormant` is the chosen landing spot because it is the only
+    /// non-breaking option that cannot overstate: the enum is `Ord` with
+    /// explicit discriminants, so a dedicated `Invalid` variant would
+    /// change the discriminants and the wire format. If you need to
+    /// distinguish "measured as zero" from "measurement was broken", check
+    /// `phi.is_finite()` yourself before calling — this function
+    /// deliberately collapses the two rather than inventing a level.
     pub fn from_phi(phi: f32) -> Self {
-        // Non-finite Φ (NaN, +inf, -inf) must NOT optimistically classify as
-        // the highest state. All `phi < ...` comparisons against NaN return
-        // false in IEEE-754, which previously fell through to Resonant.
         if !phi.is_finite() {
             return Self::Dormant;
         }
@@ -457,17 +483,43 @@ mod tests {
         // Regression: previously NaN / ±inf classified as Resonant because
         // every `phi < threshold` comparison against a non-finite returns
         // false, falling through to the trailing `else`.
+        //
+        // Re-reported as #64 against a stale build artifact. The behaviour
+        // was already correct; this test is hardened so that if the guard
+        // is ever actually removed, the failure names the specific wrong
+        // answer rather than just "not Dormant".
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let level = ConsciousnessLevel::from_phi(bad);
+            assert_eq!(
+                level,
+                ConsciousnessLevel::Dormant,
+                "non-finite Φ {bad} must classify as Dormant, got {level:?}"
+            );
+            // The specific failure mode this guard exists to prevent: a
+            // broken measurement reported as a high consciousness state.
+            assert!(
+                level < ConsciousnessLevel::Aware,
+                "non-finite Φ {bad} must never reach an elevated level, got {level:?}"
+            );
+        }
+
+        // Anti-vacuous: the guard must reject only non-finite input. If it
+        // were widened to "always Dormant", or the threshold ladder were
+        // broken outright, these would fail — so the assertions above
+        // cannot be satisfied by a degenerate implementation.
         assert_eq!(
-            ConsciousnessLevel::from_phi(f32::NAN),
+            ConsciousnessLevel::from_phi(0.0),
             ConsciousnessLevel::Dormant
         );
+        assert_eq!(ConsciousnessLevel::from_phi(0.5), ConsciousnessLevel::Aware);
         assert_eq!(
-            ConsciousnessLevel::from_phi(f32::INFINITY),
-            ConsciousnessLevel::Dormant
+            ConsciousnessLevel::from_phi(0.85),
+            ConsciousnessLevel::Resonant
         );
         assert_eq!(
-            ConsciousnessLevel::from_phi(f32::NEG_INFINITY),
-            ConsciousnessLevel::Dormant
+            ConsciousnessLevel::from_phi(1.0),
+            ConsciousnessLevel::Transcendent,
+            "the top of the ladder must still be reachable"
         );
     }
 
