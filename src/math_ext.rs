@@ -25,6 +25,7 @@ pub trait F32Ext {
     fn abs(self) -> f32;
     fn atan2(self, other: f32) -> f32;
     fn powi(self, n: i32) -> f32;
+    fn rem_euclid(self, rhs: f32) -> f32;
 }
 
 impl F32Ext for f32 {
@@ -67,6 +68,19 @@ impl F32Ext for f32 {
     #[inline]
     fn powi(self, n: i32) -> f32 {
         libm::powf(self, n as f32)
+    }
+    /// Mirrors `std::f32::rem_euclid`: the remainder carries the sign of
+    /// `rhs`, so the result is always non-negative for a positive `rhs`.
+    /// `libm::fmodf` alone keeps the sign of `self`, which would let
+    /// `detect_hives`' circular-distance fold go negative. (#29)
+    #[inline]
+    fn rem_euclid(self, rhs: f32) -> f32 {
+        let r = libm::fmodf(self, rhs);
+        if r < 0.0 {
+            r + libm::fabsf(rhs)
+        } else {
+            r
+        }
     }
 }
 

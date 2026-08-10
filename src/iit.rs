@@ -152,13 +152,17 @@ pub struct PhiNode {
 pub fn compute_phi(nodes: &[PhiNode]) -> PhiReport {
     let n = nodes.len() as f32;
     if n < 2.0 {
+        // Φ is genuinely zero below two nodes, but the structural metadata
+        // must still describe the input: a one-node graph has exactly one
+        // partition, and reporting 0 made it indistinguishable from an
+        // empty graph for anything inspecting `num_partitions` (#53).
         return PhiReport {
             phi: 0.0,
             integration: 0.0,
             differentiation: 0.0,
             density_factor: 0.0,
             scale_factor: 0.0,
-            num_partitions: 0,
+            num_partitions: nodes.len().min(1),
             num_connections: 0,
         };
     }
@@ -292,6 +296,23 @@ mod tests {
             connections: vec![],
         }]);
         assert_eq!(report.phi, 0.0);
+    }
+
+    #[test]
+    fn single_node_reports_one_partition() {
+        // Regression for #53 — Φ is legitimately 0 below two nodes, but
+        // reporting num_partitions = 0 made a one-node graph structurally
+        // indistinguishable from an empty one.
+        let one = compute_phi(&[PhiNode {
+            partition: 7,
+            connections: vec![],
+        }]);
+        assert_eq!(one.phi, 0.0, "Φ stays zero for a single node");
+        assert_eq!(one.num_partitions, 1, "one node is one partition");
+        assert_eq!(one.num_connections, 0);
+
+        let empty = compute_phi(&[]);
+        assert_eq!(empty.num_partitions, 0, "an empty graph has no partitions");
     }
 
     #[test]

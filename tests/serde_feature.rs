@@ -46,7 +46,7 @@ fn consciousness_level_wire_format_matches_nats_contract() {
 
 #[test]
 fn phi_report_serde_roundtrip() {
-    use consciousness_core::iit::{compute_phi, PhiNode};
+    use consciousness_core::iit::{compute_phi, PhiNode, PhiReport};
     let report = compute_phi(&[
         PhiNode {
             partition: 0,
@@ -62,6 +62,37 @@ fn phi_report_serde_roundtrip() {
     assert!(json.contains("\"phi\""));
     assert!(json.contains("\"integration\""));
     assert!(json.contains("\"num_connections\""));
+    let back: PhiReport = serde_json::from_str(&json).expect("deserialize");
+    assert!((back.phi - report.phi).abs() < 1e-6);
+    assert_eq!(back.num_connections, report.num_connections);
+}
+
+#[test]
+fn vec_bearing_types_roundtrip() {
+    // Regression for the whole serde cluster (#2 #43 #44 #55 #56). Every
+    // type here already carried the right derives; the feature was pulling
+    // serde in with `default-features = false` and no `alloc`, so `Vec<T>`
+    // had no Serialize/Deserialize impl. `PhiNode.connections: Vec<usize>`
+    // and `XiSignature.values: Vec<f32>` failed to compile, which killed
+    // the entire `--features serde` build — including the Vec-free types.
+    // These two are the canaries: if `serde/alloc` is ever dropped from
+    // Cargo.toml, this file stops compiling again.
+    use consciousness_core::iit::PhiNode;
+    use consciousness_core::XiSignature;
+
+    let node = PhiNode {
+        partition: 7,
+        connections: vec![1, 2, 3],
+    };
+    let json = serde_json::to_string(&node).expect("serialize PhiNode");
+    let back: PhiNode = serde_json::from_str(&json).expect("deserialize PhiNode");
+    assert_eq!(back.connections, vec![1, 2, 3]);
+    assert_eq!(back.partition, 7);
+
+    let sig = XiSignature::compute(&[1.0, 0.5, 0.3, 0.2]);
+    let json = serde_json::to_string(&sig).expect("serialize XiSignature");
+    let back: XiSignature = serde_json::from_str(&json).expect("deserialize XiSignature");
+    assert_eq!(back.values, sig.values);
 }
 
 #[test]

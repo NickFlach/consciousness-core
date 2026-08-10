@@ -126,7 +126,21 @@ impl CouplingBridge {
         self.k_effective = match self.mode {
             CouplingMode::Static => self.config.k_base,
             CouplingMode::MarketMediated => {
-                (self.config.k_base * signal).clamp(self.config.k_min, self.config.k_max)
+                // `f32::clamp` propagates NaN rather than bounding it, so a
+                // non-finite signal used to return NaN coupling for the
+                // affected tick (#41). The mean_signal() half of that issue
+                // was already fixed above by not storing the sample; this
+                // covers the coupling half. A garbage sample means "no new
+                // information", so hold the last good coupling.
+                if signal.is_finite() {
+                    (self.config.k_base * signal).clamp(self.config.k_min, self.config.k_max)
+                } else if self.k_effective.is_finite() {
+                    self.k_effective
+                } else {
+                    self.config
+                        .k_base
+                        .clamp(self.config.k_min, self.config.k_max)
+                }
             }
             CouplingMode::Adaptive => {
                 // Reject a non-finite coherence sample (#19). Without this, a
@@ -409,6 +423,39 @@ mod tests {
             "mean over finite samples 2 and 4 = 3, got {}",
             bridge.mean_signal()
         );
+    }
+
+    #[test]
+    fn market_mediated_holds_coupling_on_non_finite_signal() {
+        // Regression for #41 — f32::clamp propagates NaN instead of
+        // bounding it, so `k_base * NaN` came straight back out of
+        // update() as NaN coupling for the affected tick.
+        let mut bridge = CouplingBridge::new(
+            BridgeConfig {
+                k_base: 1.0,
+                k_min: 0.1,
+                k_max: 5.0,
+                ..Default::default()
+            },
+            CouplingMode::MarketMediated,
+        );
+        let good = bridge.update(2.0, 0.5);
+        assert!((good - 2.0).abs() < 1e-5);
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let k = bridge.update(bad, 0.5);
+            assert!(
+                k.is_finite(),
+                "signal {bad} must not yield NaN coupling: {k}"
+            );
+            assert!(
+                (k - good).abs() < 1e-6,
+                "coupling should hold at the last good value on signal {bad}: {good} → {k}"
+            );
+        }
+        // A later valid sample still steers coupling normally.
+        let recovered = bridge.update(3.0, 0.5);
+        assert!((recovered - 3.0).abs() < 1e-5);
+        assert!(bridge.mean_signal().is_finite());
     }
 
     #[test]

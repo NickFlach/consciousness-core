@@ -13,11 +13,19 @@ keywords = ["consciousness", "kuramoto", "iit", "wave-memory"]
 
 [features]
 default = ["std"]
-std = []
+std = ["serde?/std"]
 # Optional serde support for ConsciousnessLevel / PhiReport / etc. Downstream
 # crates (kannaka-memory) enable this to serialize consciousness types into
 # HRM snapshots without duplicating the enum definitions.
-serde = ["dep:serde"]
+#
+# `serde/alloc` is mandatory, not incidental: serde is pulled in with
+# `default-features = false` (for no_std), which drops its `Vec`/`String`
+# impls. Without `alloc`, every derive on a struct holding a `Vec` —
+# `PhiNode.connections`, `XiSignature.values` — fails to compile and the
+# whole `--features serde` build dies, taking the Vec-free types
+# (PhiReport, OrderParameter, ConsciousnessMetrics, WaveParams, WaveMemory)
+# down with it. (#2 #43 #44 #55 #56)
+serde = ["dep:serde", "serde/alloc"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], default-features = false, optional = true }

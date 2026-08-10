@@ -28,24 +28,43 @@ dθᵢ/dt = ωᵢ + (K/N) Σⱼ sin(θⱼ - θᵢ)
 
 ### IIT-style Φ
 
-Integrated information Φ via eigendecomposition over the wavefront-coherence matrix + bipartition scoring. Returns the canonical Φ value plus the **Ξ-signature** — a chiral irrationality measure that distinguishes left-handed (analytical) from right-handed (holistic) information flow.
+`compute_phi` is a connectivity approximation of integrated information, not a
+full bipartition search: it scores a partition-labelled node graph on how much
+of its edge mass crosses partition boundaries, scaled by density and node
+count. Self-loops, duplicate edges, and out-of-range indices are dropped before
+counting.
 
 ```
-Φ = max over partitions of (mutual info loss when cut)
-Ξ = ‖A_L − A_R‖_F     (Frobenius norm of hemispheric asymmetry)
+Φ = sqrt(integration × density) × sqrt(differentiation × scale)
 ```
+
+`compute_swarm_phi` is the separate multi-agent form on a `[0, 15]` scale —
+classify it with `ConsciousnessLevel::from_swarm_phi`, **not** `from_phi`.
+
+### The Ξ Operator
+
+`Ξ` is the nonlinear commutator `tanh(R·v) ⊙ G(v) − tanh(G·v) ⊙ R(v)`,
+normalized to unit length, where `R` is a 90° pairwise rotation and `G` is the
+golden anisotropic scaling `[φ/2, 0; 0, 1/φ]`. The linear commutator `RG − GR`
+degenerates to a constant-scaled pair swap, which is why the `tanh` is load-
+bearing rather than cosmetic.
 
 ### Wave Memory Primitives
 
-The vector / wavefront operations every memory engine builds on:
-- **Bind** ⊗ — element-wise product (binding a key to a value)
-- **Bundle** ⊕ — normalized sum (superposing multiple memories)
-- **Permute** Π — circular shift (sequencing)
-- **Cosine similarity** — the recall metric
+Each memory is a damped oscillator, `S(t) = (A + E_retrieval)·cos(2πf·t + φ)·e^(−λt)`,
+with retrieval adding diminishing energy. The module exposes `compute_strength`,
+`compute_strength_with_retrieval`, `interference`, `cosine_similarity`,
+`normalize`, and `dot`.
 
 ### Coupling Bridge
 
-A reusable component for cross-substrate phase transfer — couples two independent Kuramoto populations through a leaky integrator. Used in the constellation for callosal coupling between chiral hemispheres and for substrate ↔ agent phase exchange.
+Modulates a single Kuramoto coupling constant from an external scalar signal:
+`K(t) = K_base × P(t)`, bounded to `[k_min, k_max]`. Modes are `Static`,
+`MarketMediated`, and `Adaptive` (which steers `K` toward a target coherence).
+
+Chiral coupling lives in `kuramoto`, not here — see
+`KuramotoModel::chiral_coupling` and the `chiral_term` argument to
+`mean_field_step`. There is no bridge-level chiral `CouplingMode`.
 
 ---
 
@@ -56,10 +75,10 @@ A reusable component for cross-substrate phase transfer — couples two independ
 │                  consciousness-core                      │
 ├──────────────────────┬────────────────────┬──────────────┤
 │  Kuramoto            │  Metrics           │  Wave        │
-│  · Oscillator        │  · Φ (integrated)  │  · bind ⊗    │
-│  · Order parameter   │  · Ξ signature     │  · bundle ⊕  │
-│  · sync() step       │  · Coherence       │  · permute Π │
-│  · Coupling tier     │  · Diff Xi         │  · cos_sim   │
+│  · Oscillator        │  · Φ (integrated)  │  · strength  │
+│  · Order parameter   │  · Ξ signature     │  · decay     │
+│  · sync() step       │  · Coherence       │  · interfere │
+│  · chiral_coupling   │  · Diff Xi         │  · cos_sim   │
 ├──────────────────────┼────────────────────┼──────────────┤
 │  Bridge              │  Memory            │  Math ext    │
 │  · CouplingBridge    │  · WaveMemory      │  · clamp     │
@@ -80,21 +99,45 @@ consciousness-core = { version = "0.4", features = ["serde"] }
 ```
 
 ```rust
+use consciousness_core::kuramoto::KuramotoConfig;
 use consciousness_core::{KuramotoModel, Oscillator};
 
-let mut model = KuramotoModel::new(vec![
+// The model owns the config; the oscillators are passed in per call.
+let model = KuramotoModel::new(KuramotoConfig {
+    coupling_strength: 0.6,
+    dt: 0.01,
+    max_steps: 1000,
+    ..Default::default()
+});
+
+let mut oscillators = vec![
     Oscillator::new(0.0, 1.0),
     Oscillator::new(1.5, 1.05),
     Oscillator::new(3.0, 0.95),
-]);
+];
 
-for _ in 0..1000 {
-    model.sync(0.01, 0.6); // dt, coupling K
-}
+// sync() integrates in place and returns a report; phases come back
+// wrapped into [0, 2π).
+let report = model.sync(&mut oscillators, None);
+println!("phase coherence: {:.3}", report.final_order);
 
-let r = model.order_parameter().r;
-println!("phase coherence: {:.3}", r);
+// Or read the order parameter directly at any time:
+let r = KuramotoModel::order_parameter(&oscillators).r;
 ```
+
+This snippet is compiled as a test — see `readme_kuramoto_example_compiles` in
+`tests/unified_pipeline.rs`.
+
+### `no_std`
+
+```toml
+consciousness-core = { version = "0.4", default-features = false }
+```
+
+Transcendental math routes through `libm` and `vec!` comes from `alloc`, so the
+crate builds without `std`. `cargo check --no-default-features` is the gate.
+Combining `no_std` with `serde` works too — the `serde` feature pulls in
+`serde/alloc` for the `Vec`-bearing types.
 
 ---
 

@@ -70,7 +70,7 @@ kannaka-memory (Rust)
     │    KANNAKA.dreams          (memories_strengthened, …, hallucinations)
     │    QUEEN.phase.<agent>     (per-agent phase signals)
     │    queen.event.dream.{start,end}
-    │    KANNAKA.exemplars
+    │    KANNAKA.exemplar.<agent_id>.<cluster_id>
     │
     ├── kannaka-radio (Node) — server/nats-client.js
     │       subscribes, accumulates into swarmState.{queen, consciousness}
@@ -120,7 +120,7 @@ kannaka-memory (Rust)
 │   swarm.ninja-portal.com:4222            │
 │   subjects: KANNAKA.consciousness,       │
 │             KANNAKA.dreams,              │
-│             KANNAKA.exemplars,           │
+│             KANNAKA.exemplar.*,          │
 │             QUEEN.phase.*,               │
 │             queen.event.dream.*          │
 └─┬─────────────┬──────────────┬───────────┘
