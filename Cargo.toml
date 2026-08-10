@@ -5,7 +5,7 @@ members = ["crates/wasm-bridge"]
 
 [package]
 name = "consciousness-core"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Unified consciousness physics: Kuramoto sync, IIT Φ, wave memory, and the Ξ operator"
 license = "MIT"

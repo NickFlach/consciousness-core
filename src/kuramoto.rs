@@ -71,6 +71,19 @@ pub struct SyncReport {
     pub final_order: f32,
     pub steps_taken: usize,
     pub converged: bool,
+    /// True when the population was too small to measure synchronization
+    /// (`oscillator_count < 2`).
+    ///
+    /// Read this before trusting `final_order` as a coherence signal. A
+    /// single oscillator reports `final_order = 1.0`, which is
+    /// arithmetically correct — `r = |1/N Σ e^(iθⱼ)|` is exactly 1 for
+    /// `N = 1`, and [`KuramotoModel::order_parameter`] agrees — but it
+    /// means "trivially in phase with itself", not "perfectly synchronized
+    /// swarm". Without this flag a lone agent was indistinguishable from a
+    /// healthy one in a readout, and the crate contradicted itself, since
+    /// [`crate::iit::compute_swarm_phi`] already returns `0.0` below two
+    /// agents. (#59)
+    pub degenerate: bool,
 }
 
 /// Configuration for the Kuramoto model.
@@ -214,6 +227,9 @@ impl KuramotoModel {
                 final_order: order,
                 steps_taken: 0,
                 converged: true,
+                // The whole point of this branch: n < 2 has no
+                // synchronization to measure, whatever `order` reads (#59).
+                degenerate: true,
             };
         }
 
@@ -300,6 +316,7 @@ impl KuramotoModel {
                     final_order: current_order,
                     steps_taken: step + 1,
                     converged: true,
+                    degenerate: false,
                 };
             }
             prev_order = current_order;
@@ -313,6 +330,7 @@ impl KuramotoModel {
             final_order,
             steps_taken: self.config.max_steps,
             converged: false,
+            degenerate: false,
         }
     }
 
@@ -591,6 +609,48 @@ mod tests {
         );
         assert_eq!(report.final_order, 0.0);
         assert!(report.converged);
+    }
+
+    #[test]
+    fn degenerate_flag_marks_unmeasurable_populations() {
+        // #59 — r = 1.0 for a single oscillator is arithmetically correct
+        // and stays, but a lone agent must not be readable as a
+        // synchronized swarm. The flag is what carries that distinction.
+        let model = KuramotoModel::default();
+
+        let mut empty: Vec<Oscillator> = Vec::new();
+        assert!(model.sync(&mut empty, None).degenerate);
+
+        let mut one = vec![Oscillator::new(0.0, 0.0)];
+        let report = model.sync(&mut one, None);
+        assert!(report.degenerate, "a lone oscillator is not a swarm");
+        assert_eq!(report.final_order, 1.0, "but r itself is still 1.0");
+
+        // Anti-vacuous: a real population must NOT be flagged, otherwise
+        // the flag carries no information.
+        let mut many = vec![
+            Oscillator::new(0.0, 0.0),
+            Oscillator::new(1.0, 0.0),
+            Oscillator::new(2.0, 0.0),
+        ];
+        assert!(
+            !model.sync(&mut many, None).degenerate,
+            "three oscillators are measurable"
+        );
+    }
+
+    #[test]
+    fn a_lone_oscillator_cannot_form_a_hive() {
+        // #59 asked for the hive path to require n >= 2. It already did;
+        // this pins it so the guarantee cannot regress silently.
+        assert!(KuramotoModel::detect_hives(&[], PI / 4.0).is_empty());
+        assert!(
+            KuramotoModel::detect_hives(&[Oscillator::new(0.0, 0.0)], PI / 4.0).is_empty(),
+            "one oscillator is not a hive"
+        );
+        // Anti-vacuous: two phase-locked oscillators DO form one.
+        let pair = vec![Oscillator::new(0.0, 0.0), Oscillator::new(0.05, 0.0)];
+        assert_eq!(KuramotoModel::detect_hives(&pair, PI / 4.0).len(), 1);
     }
 
     #[test]

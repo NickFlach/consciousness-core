@@ -64,7 +64,7 @@ fn unified_xi_pipeline_full_flow() {
         level: ConsciousnessLevel::from_phi(phi_report.phi),
     };
 
-    let xi = metrics.unified_xi();
+    let xi = metrics.unified_consciousness();
     assert!(
         xi > 0.0,
         "unified Ξ should be positive after successful sync"

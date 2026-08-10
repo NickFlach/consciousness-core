@@ -7,6 +7,60 @@ from 0.2.0 forward.
 
 ---
 
+## [0.5.0] — 2026-08-10
+
+Metric-semantics decisions. Four open questions about what these numbers
+*mean* — deferred from the 0.4.x contract sweep because they needed a
+judgment call rather than a guard — were decided and implemented.
+
+### Breaking
+- `ConsciousnessMetrics::compute_differentiation_xi` now returns
+  `Result<f32, XiError>`. Mixed-dimension and zero-length embedding
+  batches are caller errors, not a semantic zero. Previously
+  `cosine_similarity` returned `0.0` for incomparable vectors and this
+  function read that as genuine flatness, reporting a plausible and
+  wrong `xi = 0.0`. Call sites need `?` or `.unwrap()`. (#60)
+- `SyncReport` gains a `degenerate: bool` field, so struct-literal
+  construction must be updated. It is `true` when
+  `oscillator_count < 2`. (#59)
+- `ConsciousnessMetrics::unified_xi` is renamed to
+  `unified_consciousness`. The old name remains as a `#[deprecated]`
+  alias delegating to it, so this does not break on upgrade — but it
+  will warn. (#36)
+
+### Changed
+- `compute_differentiation_xi` special-cases `n == 2` to the normalized
+  cosine distance of the pair, `(1 - cos_sim) / 2`. The variance of one
+  sample about its own mean is identically zero, so the previous
+  definition returned `0.0` for *any* two vectors however different —
+  erasing the API's smallest meaningful input. Deliberately piecewise:
+  `n == 2` measures distance, `n >= 3` measures spread. (#35)
+- `sync()` reports `degenerate: true` below two oscillators. `r` itself
+  is unchanged and still `1.0` for a singleton, which is arithmetically
+  correct (`|e^(iθ)| = 1`) and consistent with `order_parameter`. The
+  flag is what stops a lone agent reading as a synchronized swarm, and
+  resolves the inconsistency with `compute_swarm_phi`'s `n < 2 → 0.0`. (#59)
+
+### Added
+- `XiError` — `MixedDimensions { expected, found, index }` and
+  `EmptyVectors`. Implements `Display`, and `std::error::Error` under
+  the `std` feature. (#60)
+- `ConsciousnessMetrics::unified_with_differentiation()` — the unified
+  product scaled by the struct's `xi`. A *different* metric, not a
+  corrected one: reach for it when you want a reading that collapses if
+  the system stops being differentiated. (#36)
+
+### Notes
+- `detect_hives` was already guarded at `n >= 2` and needed no change;
+  a regression test now pins it.
+- `unified_consciousness` still deliberately excludes `xi`. The crate
+  uses "Xi" for two different quantities — the `Ξ` of the unified
+  equation (leading term MSI) and the differentiation `xi` on the
+  struct — and this method computes the former. A test pins that as
+  intent so a future reader does not "fix" it.
+
+---
+
 ## [0.4.0] — 2026-05-23
 
 Range-contract hardening sweep — closes the nine open issues filed

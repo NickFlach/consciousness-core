@@ -40,6 +40,52 @@ pub const BETA: f32 = 0.618034; // 1.0 / PHI
 /// Emergence coefficient: α - β ≈ 0.190983
 pub const EMERGENCE_COEFF: f32 = 0.190983; // ALPHA - BETA
 
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+/// Why a differentiation-Xi computation could not be performed.
+///
+/// These are caller errors — a malformed embedding batch, not a system
+/// state worth reporting a number for. They exist because
+/// [`crate::wave::cosine_similarity`] returns `0.0` for incomparable
+/// vectors, which reads identically to "orthogonal": without this,
+/// mixed-dimension input produced a plausible and completely wrong
+/// `xi = 0.0`. (#60)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum XiError {
+    /// The batch mixed embedding dimensions.
+    MixedDimensions {
+        /// Length of the first vector, taken as the batch's dimension.
+        expected: usize,
+        /// Length of the first vector that disagreed.
+        found: usize,
+        /// Index of that vector in the batch.
+        index: usize,
+    },
+    /// The batch consisted of zero-length vectors.
+    EmptyVectors,
+}
+
+impl core::fmt::Display for XiError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MixedDimensions {
+                expected,
+                found,
+                index,
+            } => write!(
+                f,
+                "embedding batch mixes dimensions: expected {expected}, \
+                 found {found} at index {index}"
+            ),
+            Self::EmptyVectors => write!(f, "embedding batch contains zero-length vectors"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for XiError {}
+
 // ─── Xi Signature ────────────────────────────────────────────────────────────
 
 /// A computed Xi signature for a vector.
@@ -202,26 +248,122 @@ pub struct ConsciousnessMetrics {
 }
 
 impl ConsciousnessMetrics {
-    /// Compute the unified Ξ metric:
+    /// Compute the unified consciousness metric:
     ///
     /// ```text
     /// unified = Φ × r × K(t) × Ψ
     /// ```
-    pub fn unified_xi(&self) -> f32 {
+    ///
+    /// **This deliberately does not include [`Self::xi`]** — see
+    /// [`Self::unified_with_differentiation`] if you want differentiation
+    /// folded in.
+    ///
+    /// The two are easy to conflate because the crate uses "Xi" for two
+    /// different things: the `Ξ` of the unified equation
+    /// (`Ξ = MSI ⊗ Φ ⊗ K(t) ⊗ Ψ`), whose leading term is Multi-Scale
+    /// Integration, and the `xi` field on this struct, which is the
+    /// *differentiation* Xi from [`Self::compute_differentiation_xi`].
+    /// This method computes the former. It was named `unified_xi`, which
+    /// read as a promise about the latter (#36).
+    pub fn unified_consciousness(&self) -> f32 {
         self.phi * self.order_parameter * self.coupling * self.wave_strength
+    }
+
+    /// Deprecated alias for [`Self::unified_consciousness`].
+    ///
+    /// The formula is unchanged — only the name was wrong. Kept so the
+    /// rename does not break downstream on upgrade.
+    #[deprecated(
+        since = "0.5.0",
+        note = "renamed to `unified_consciousness`: this never included the `xi` field, \
+                and the old name read as a promise that it did. Use \
+                `unified_with_differentiation()` if you want differentiation included."
+    )]
+    pub fn unified_xi(&self) -> f32 {
+        self.unified_consciousness()
+    }
+
+    /// [`Self::unified_consciousness`] scaled by the differentiation Xi
+    /// carried on this struct:
+    ///
+    /// ```text
+    /// unified × xi = Φ × r × K(t) × Ψ × Ξ_differentiation
+    /// ```
+    ///
+    /// This is a **different metric**, not a corrected one — reach for it
+    /// when you want a reading that collapses if the system stops being
+    /// differentiated, which `unified_consciousness` deliberately does not
+    /// do. Ranges `[0, 1]` given in-range inputs, since `xi` is itself
+    /// bounded to `[0, 1]` by `compute_differentiation_xi`. (#36)
+    pub fn unified_with_differentiation(&self) -> f32 {
+        self.unified_consciousness() * self.xi
     }
 
     /// Compute Xi from a set of embedding vectors.
     ///
     /// Blends:
-    /// 1. Pairwise similarity variance (how differentiated are the embeddings?)
-    /// 2. Xi operator signature variance (non-commutative differentiation)
+    /// 1. Pairwise similarity spread (how differentiated are the embeddings?)
+    /// 2. Xi operator signature spread (non-commutative differentiation)
     ///
-    /// Returns a value in [0, 1].
-    pub fn compute_differentiation_xi(vectors: &[&[f32]], xi_weight: f32) -> f32 {
+    /// Returns a value in `[0, 1]`, or [`XiError`] if the input is not a
+    /// well-formed embedding batch.
+    ///
+    /// # The `n == 2` case
+    ///
+    /// With exactly two vectors there is a single pair, and the variance of
+    /// one sample about its own mean is identically zero — so the spread
+    /// definition returned 0.0 ("no differentiation") for *any* two
+    /// vectors, however different (#35). For `n == 2` both signals are
+    /// therefore the normalized cosine distance of the pair,
+    /// `(1 - cos_sim) / 2`, which maps the legal cosine range onto
+    /// `[0, 1]`: identical → 0.0, orthogonal → 0.5, opposed → 1.0.
+    ///
+    /// This is deliberately piecewise. `n == 2` measures *distance* while
+    /// `n >= 3` measures *spread*, so Xi can move discontinuously as a
+    /// corpus grows from two to three vectors. The fully continuous
+    /// alternative (mean pairwise distance throughout) would rewrite every
+    /// historical Xi value, which is the more expensive of the two costs
+    /// while anything compares Xi across time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XiError::MixedDimensions`] if the vectors are not all the
+    /// same length, and [`XiError::EmptyVectors`] if they are zero-length.
+    /// Both are caller errors: `cosine_similarity` yields `0.0` for
+    /// incomparable inputs, which this function would otherwise read as
+    /// genuine semantic flatness and report as a plausible, wrong
+    /// `xi = 0.0` (#60).
+    pub fn compute_differentiation_xi(vectors: &[&[f32]], xi_weight: f32) -> Result<f32, XiError> {
         let n = vectors.len();
         if n <= 1 {
-            return 0.0;
+            return Ok(0.0);
+        }
+
+        // Validate the batch before any similarity is taken. Done up front
+        // so a ragged batch is rejected outright rather than silently
+        // contributing 0.0 similarities from the mismatched pairs (#60).
+        let dim = vectors[0].len();
+        if dim == 0 {
+            return Err(XiError::EmptyVectors);
+        }
+        if let Some(pos) = vectors.iter().position(|v| v.len() != dim) {
+            return Err(XiError::MixedDimensions {
+                expected: dim,
+                found: vectors[pos].len(),
+                index: pos,
+            });
+        }
+
+        // n == 2: one pair, so spread is degenerate. Use normalized cosine
+        // distance for both signals instead. (#35)
+        if n == 2 {
+            let normalized_distance =
+                |a: &[f32], b: &[f32]| ((1.0 - cosine_similarity(a, b)) / 2.0).clamp(0.0, 1.0);
+            let sim_xi = normalized_distance(vectors[0], vectors[1]);
+            let xi_a = compute_xi_signature(vectors[0]);
+            let xi_b = compute_xi_signature(vectors[1]);
+            let xi_xi = normalized_distance(&xi_a, &xi_b);
+            return Ok((((sim_xi + xi_xi) / 2.0) * xi_weight).clamp(0.0, 1.0));
         }
 
         // Signal 1: Similarity variance
@@ -284,7 +426,7 @@ impl ConsciousnessMetrics {
         // Clamp the weighted result so the documented [0,1] return range
         // holds for any xi_weight. With xi_weight > 1 the average could
         // exceed 1 even though each component is individually clamped.
-        (((sim_xi + xi_xi) / 2.0) * xi_weight).clamp(0.0, 1.0)
+        Ok((((sim_xi + xi_xi) / 2.0) * xi_weight).clamp(0.0, 1.0))
     }
 }
 
@@ -362,26 +504,162 @@ mod tests {
         assert!((EMERGENCE_COEFF - (ALPHA - BETA)).abs() < 1e-4);
     }
 
-    #[test]
-    fn unified_xi_product() {
-        let m = ConsciousnessMetrics {
+    fn metrics_fixture(xi: f32) -> ConsciousnessMetrics {
+        ConsciousnessMetrics {
             phi: 0.5,
-            xi: 0.3,
+            xi,
             order_parameter: 0.8,
             coherence: 0.7,
             coupling: 1.0,
             wave_strength: 0.9,
             level: crate::iit::ConsciousnessLevel::Aware,
-        };
+        }
+    }
+
+    #[test]
+    fn unified_consciousness_product() {
+        let m = metrics_fixture(0.3);
         let expected = 0.5 * 0.8 * 1.0 * 0.9;
-        assert!((m.unified_xi() - expected).abs() < 1e-5);
+        assert!((m.unified_consciousness() - expected).abs() < 1e-5);
+    }
+
+    #[test]
+    fn unified_consciousness_deliberately_ignores_xi() {
+        // #36 — the formula is Φ × r × K × Ψ and does NOT include the
+        // differentiation xi. Pinning that as intent rather than accident,
+        // so a future reader does not "fix" it by multiplying xi in.
+        let low = metrics_fixture(0.01);
+        let high = metrics_fixture(0.99);
+        assert_eq!(
+            low.unified_consciousness(),
+            high.unified_consciousness(),
+            "unified_consciousness must not vary with xi"
+        );
+    }
+
+    #[test]
+    fn unified_with_differentiation_does_vary_with_xi() {
+        // #36 — the new accessor is the one that folds differentiation in.
+        let low = metrics_fixture(0.2);
+        let high = metrics_fixture(0.8);
+        assert!(
+            high.unified_with_differentiation() > low.unified_with_differentiation(),
+            "unified_with_differentiation must track xi"
+        );
+        let m = metrics_fixture(0.5);
+        assert!((m.unified_with_differentiation() - m.unified_consciousness() * 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_unified_xi_alias_matches_new_name() {
+        // The rename must not change the number for anyone still on the
+        // old name (#36).
+        let m = metrics_fixture(0.3);
+        assert_eq!(m.unified_xi(), m.unified_consciousness());
     }
 
     #[test]
     fn differentiation_xi_zero_for_single() {
         let v = vec![1.0, 0.0, 0.0];
-        let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&v], 1.0);
+        let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&v], 1.0).unwrap();
         assert_eq!(xi, 0.0);
+    }
+
+    #[test]
+    fn two_vectors_report_positive_differentiation() {
+        // Regression for #35 — the variance of one sample about its own
+        // mean is identically zero, so ANY two vectors returned 0.0.
+        let a = vec![1.0f32, 0.0, 0.0, 0.0];
+        let b = vec![0.0f32, 1.0, 0.0, 0.0];
+        let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b], 1.0).unwrap();
+        assert!(
+            xi > 0.0,
+            "two clearly different vectors must not read as undifferentiated: {xi}"
+        );
+        assert!((0.0..=1.0).contains(&xi), "still in range: {xi}");
+    }
+
+    #[test]
+    fn two_identical_vectors_report_zero_differentiation() {
+        // The other end of the #35 fix: the n==2 branch must not manufacture
+        // differentiation where there is none. cos_sim = 1 → distance 0.
+        let a = vec![1.0f32, 0.5, 0.25, 0.125];
+        let xi = ConsciousnessMetrics::compute_differentiation_xi(&[&a, &a], 1.0).unwrap();
+        assert!(
+            xi.abs() < 1e-6,
+            "identical vectors → ~0 differentiation: {xi}"
+        );
+    }
+
+    #[test]
+    fn two_vector_differentiation_is_ordered_by_distance() {
+        // Anti-vacuous: the n==2 branch must actually track how different
+        // the pair is, not just return some positive constant.
+        let base = vec![1.0f32, 0.0, 0.0, 0.0];
+        let near = vec![0.95f32, 0.05, 0.0, 0.0];
+        let orthogonal = vec![0.0f32, 1.0, 0.0, 0.0];
+        let opposed = vec![-1.0f32, 0.0, 0.0, 0.0];
+
+        let d_near =
+            ConsciousnessMetrics::compute_differentiation_xi(&[&base, &near], 1.0).unwrap();
+        let d_orth =
+            ConsciousnessMetrics::compute_differentiation_xi(&[&base, &orthogonal], 1.0).unwrap();
+        let d_opp =
+            ConsciousnessMetrics::compute_differentiation_xi(&[&base, &opposed], 1.0).unwrap();
+
+        assert!(
+            d_near < d_orth && d_orth < d_opp,
+            "differentiation must increase with distance: near={d_near} orth={d_orth} opp={d_opp}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&d_opp),
+            "opposed still in range: {d_opp}"
+        );
+    }
+
+    #[test]
+    fn mixed_dimension_batch_is_an_error_not_zero() {
+        // Regression for #60 — cosine_similarity returns 0.0 for
+        // incomparable vectors, which this function used to read as
+        // genuine semantic flatness and report as xi = 0.0.
+        let a = vec![1.0f32, 0.0];
+        let b = vec![1.0f32, 0.0, 0.0];
+        let err = ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b], 1.0).unwrap_err();
+        assert_eq!(
+            err,
+            XiError::MixedDimensions {
+                expected: 2,
+                found: 3,
+                index: 1
+            }
+        );
+
+        // The mismatch is caught wherever it sits in the batch, not just
+        // at index 1.
+        let c = vec![1.0f32, 1.0];
+        let err = ConsciousnessMetrics::compute_differentiation_xi(&[&a, &c, &b], 1.0).unwrap_err();
+        assert!(matches!(err, XiError::MixedDimensions { index: 2, .. }));
+    }
+
+    #[test]
+    fn empty_vectors_are_an_error() {
+        let a: Vec<f32> = vec![];
+        let b: Vec<f32> = vec![];
+        assert_eq!(
+            ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b], 1.0).unwrap_err(),
+            XiError::EmptyVectors
+        );
+    }
+
+    #[test]
+    fn uniform_dimension_batch_is_accepted() {
+        // Anti-vacuous companion to the two error tests: the validation
+        // must not reject well-formed input.
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![0.0f32, 1.0, 0.0];
+        let c = vec![0.0f32, 0.0, 1.0];
+        assert!(ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b, &c], 1.0).is_ok());
     }
 
     #[test]
@@ -409,7 +687,8 @@ mod tests {
         let xi = ConsciousnessMetrics::compute_differentiation_xi(
             &[&v1[..], &v2[..], &v3[..], &v4[..]],
             1.0,
-        );
+        )
+        .unwrap();
         assert!(xi > 0.0, "different vectors → positive xi, got {}", xi);
     }
 
@@ -425,7 +704,8 @@ mod tests {
             let xi = ConsciousnessMetrics::compute_differentiation_xi(
                 &[&a[..], &b[..], &c[..], &d[..]],
                 weight,
-            );
+            )
+            .unwrap();
             assert!(
                 (0.0..=1.0).contains(&xi),
                 "xi out of range for weight={weight}: {xi}"
