@@ -105,6 +105,7 @@ fn sync_report_and_order_parameter_serde() {
         final_order: 0.9,
         steps_taken: 12,
         converged: true,
+        degenerate: false,
     };
     let o = serde_json::to_string(&order).unwrap();
     let r = serde_json::to_string(&report).unwrap();
