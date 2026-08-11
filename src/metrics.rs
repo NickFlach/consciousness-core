@@ -27,7 +27,11 @@ use crate::math_ext::F32Ext;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use crate::wave::cosine_similarity;
+// Production code in this module deliberately uses only the checked form.
+// If `cosine_similarity` ever reappears in a non-test path here, that is a
+// regression of #67 — the lossy sentinel is exactly what let incomparable
+// vectors masquerade as orthogonal ones.
+use crate::wave::{try_cosine_similarity, VectorCompareError};
 
 // ─── Golden Ratio Constants ──────────────────────────────────────────────────
 
@@ -52,6 +56,7 @@ pub const EMERGENCE_COEFF: f32 = 0.190983; // ALPHA - BETA
 /// `xi = 0.0`. (#60)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub enum XiError {
     /// The batch mixed embedding dimensions.
     MixedDimensions {
@@ -64,6 +69,21 @@ pub enum XiError {
     },
     /// The batch consisted of zero-length vectors.
     EmptyVectors,
+    /// A pair in the batch could not be compared — see
+    /// [`VectorCompareError`] for which condition.
+    ///
+    /// Reachable for a zero-magnitude or non-finite vector, neither of which
+    /// the up-front dimension check can catch. Both matter: a zero vector has
+    /// no direction, and the old lossy path scored it as *orthogonal to
+    /// everything*, which reads as maximal differentiation and inflates Xi.
+    /// (#67)
+    Incomparable(VectorCompareError),
+}
+
+impl From<VectorCompareError> for XiError {
+    fn from(e: VectorCompareError) -> Self {
+        Self::Incomparable(e)
+    }
 }
 
 impl core::fmt::Display for XiError {
@@ -79,6 +99,7 @@ impl core::fmt::Display for XiError {
                  found {found} at index {index}"
             ),
             Self::EmptyVectors => write!(f, "embedding batch contains zero-length vectors"),
+            Self::Incomparable(e) => write!(f, "embedding pair could not be compared: {e}"),
         }
     }
 }
@@ -111,6 +132,16 @@ impl XiSignature {
     /// Diversity-boosted similarity score.
     pub fn diversity_boost(&self, other: &XiSignature, base_similarity: f32) -> f32 {
         xi_diversity_boost(base_similarity, &self.values, &other.values)
+    }
+
+    /// Repulsive force against another signature, or [`VectorCompareError`]
+    /// if the two cannot be compared.
+    ///
+    /// Prefer this over [`Self::repulsive_force`]: that one returns `0.0` on
+    /// a dimension mismatch, and `0.0` repulsion means *identical*, so
+    /// incomparable signatures read as the same signature. (#67)
+    pub fn try_repulsive_force(&self, other: &XiSignature) -> Result<f32, VectorCompareError> {
+        try_xi_repulsive_force(&self.values, &other.values)
     }
 }
 
@@ -182,17 +213,79 @@ pub fn compute_xi_signature(vector: &[f32]) -> Vec<f32> {
     xi
 }
 
-/// Xi-based repulsive force between two signatures. Returns [0, 1].
-pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
+/// Cosine similarity between two **Xi signatures**, which follows a
+/// different policy from raw embeddings.
+///
+/// A zero-magnitude *embedding* is caller error — an absent vector. A
+/// zero-magnitude *Xi signature* is not: [`compute_xi_signature`]
+/// legitimately returns the zero vector whenever the nonlinear commutator
+/// cancels, which happens for ordinary axis-aligned inputs (`[1, 0]` is
+/// enough). It means "this vector carries no chiral differentiation
+/// structure", which is a real state rather than a broken one.
+///
+/// So `ZeroMagnitude` maps to `0.0` here rather than propagating, preserving
+/// the crate's long-standing numeric behaviour. Mismatched lengths and
+/// non-finite values still propagate — those remain genuine caller errors.
+///
+/// # Known wart, deliberately preserved
+///
+/// Scoring a structureless signature `0.0` against its peers reads as
+/// "maximally different in Xi", which nudges `xi_variance` upward — the same
+/// shape of inflation #67 set out to remove for raw embeddings. Arguably two
+/// structureless signatures should score `1.0` (identically featureless).
+/// Changing it would silently recalibrate Xi for every axis-aligned corpus,
+/// which is the same cost that kept #35 piecewise, so it is documented here
+/// and left for an explicit decision rather than folded into a hardening
+/// pass.
+fn xi_signature_similarity(a: &[f32], b: &[f32]) -> Result<f32, VectorCompareError> {
+    match try_cosine_similarity(a, b) {
+        Ok(sim) => Ok(sim),
+        Err(VectorCompareError::ZeroMagnitude) => Ok(0.0),
+        Err(other) => Err(other),
+    }
+}
+
+/// Xi-based repulsive force between two signatures, or
+/// [`VectorCompareError`] if they cannot be compared. Returns `[0, 1]`.
+///
+/// Prefer this over [`xi_repulsive_force`] wherever a wrong answer would be
+/// worse than an error — and note the polarity, which makes the lossy form
+/// unusually dangerous here: its `0.0` fallback means *no repulsion*, i.e.
+/// **identical signatures**. A dimension mismatch therefore fails toward
+/// "these are the same thing", the most misleading answer available. (#67)
+pub fn try_xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> Result<f32, VectorCompareError> {
+    if xi_a.is_empty() || xi_b.is_empty() {
+        return Err(VectorCompareError::Empty);
+    }
     if xi_a.len() != xi_b.len() {
-        return 0.0;
+        return Err(VectorCompareError::LengthMismatch {
+            a: xi_a.len(),
+            b: xi_b.len(),
+        });
     }
     let diff_sq: f32 = xi_a
         .iter()
         .zip(xi_b.iter())
         .map(|(a, b)| (a - b).powi(2))
         .sum();
-    (diff_sq.sqrt() * EMERGENCE_COEFF).min(1.0)
+    if !diff_sq.is_finite() {
+        return Err(VectorCompareError::NonFinite);
+    }
+    Ok((diff_sq.sqrt() * EMERGENCE_COEFF).min(1.0))
+}
+
+/// Xi-based repulsive force between two signatures, yielding `0.0` when they
+/// cannot be compared. Returns `[0, 1]`.
+///
+/// # This return value is lossy, by documented policy
+///
+/// `0.0` means "no repulsion" — i.e. the signatures are identical — and is
+/// **also** what you get for a dimension mismatch, empty input, or non-finite
+/// values. Incomparable signatures therefore read as maximally similar, which
+/// is the wrong direction to fail in. Use [`try_xi_repulsive_force`] when that
+/// matters. (#67)
+pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
+    try_xi_repulsive_force(xi_a, xi_b).unwrap_or(0.0)
 }
 
 /// Diversity-boosted similarity: boosts semantically similar but Xi-different pairs.
@@ -207,8 +300,24 @@ pub fn xi_repulsive_force(xi_a: &[f32], xi_b: &[f32]) -> f32 {
 /// signatures (repulsion > 0.05) get amplified by `(1 + repulsion * 3.0)`.
 /// Tier 2 (additive): orthogonal pairs with strongly distinct Xi
 /// (repulsion > 0.1) receive a small `repulsion * 0.15` nudge.
+///
+/// # Incomparable signatures
+///
+/// If `xi_a` and `xi_b` cannot be compared (different dimensions, empty, or
+/// non-finite), `base_similarity` is returned unchanged — clamped, but
+/// otherwise unboosted. That is the correct behaviour for a reranker: no
+/// diversity information is available, so no diversity adjustment is made.
+///
+/// It is stated here because it used to be an *accident* rather than a
+/// policy: `xi_repulsive_force` returned `0.0` for a mismatch, which fell
+/// through both tier thresholds and produced this outcome by coincidence. It
+/// is now the documented contract. (#67)
 pub fn xi_diversity_boost(base_similarity: f32, xi_a: &[f32], xi_b: &[f32]) -> f32 {
-    let repulsion = xi_repulsive_force(xi_a, xi_b);
+    // Checked form: an incomparable pair means "no diversity signal", which
+    // is deliberately the same as zero repulsion here — but going through
+    // the Result makes that a decision at the call site rather than a
+    // sentinel silently agreeing with a real measurement. (#67)
+    let repulsion = try_xi_repulsive_force(xi_a, xi_b).unwrap_or(0.0);
     let boosted = if base_similarity > 0.15 && repulsion > 0.05 {
         base_similarity * (1.0 + repulsion * 3.0)
     } else if repulsion > 0.1 {
@@ -333,6 +442,13 @@ impl ConsciousnessMetrics {
     /// incomparable inputs, which this function would otherwise read as
     /// genuine semantic flatness and report as a plausible, wrong
     /// `xi = 0.0` (#60).
+    ///
+    /// Returns [`XiError::Incomparable`] if a *pair* cannot be compared even
+    /// though the batch is well-shaped — a zero-magnitude or non-finite
+    /// vector. This case is worth calling out separately because the old
+    /// lossy path did not merely lose information, it inverted it: a zero
+    /// vector scored `0.0` against every peer, which reads as *orthogonal to
+    /// everything*, i.e. maximal differentiation, and inflated Xi. (#67)
     pub fn compute_differentiation_xi(vectors: &[&[f32]], xi_weight: f32) -> Result<f32, XiError> {
         let n = vectors.len();
         if n <= 1 {
@@ -357,12 +473,18 @@ impl ConsciousnessMetrics {
         // n == 2: one pair, so spread is degenerate. Use normalized cosine
         // distance for both signals instead. (#35)
         if n == 2 {
-            let normalized_distance =
-                |a: &[f32], b: &[f32]| ((1.0 - cosine_similarity(a, b)) / 2.0).clamp(0.0, 1.0);
-            let sim_xi = normalized_distance(vectors[0], vectors[1]);
+            // Checked comparison throughout (#67). The batch is already
+            // validated above, so these cannot fail today — going through
+            // the Result is what stops the two from drifting apart later,
+            // and means a future edit to the validation cannot silently
+            // reintroduce "incomparable reads as orthogonal".
+            let to_distance = |s: f32| ((1.0 - s) / 2.0).clamp(0.0, 1.0);
+            // Raw embeddings propagate every failure; Xi signatures tolerate
+            // ZeroMagnitude, which the operator legitimately produces.
+            let sim_xi = to_distance(try_cosine_similarity(vectors[0], vectors[1])?);
             let xi_a = compute_xi_signature(vectors[0]);
             let xi_b = compute_xi_signature(vectors[1]);
-            let xi_xi = normalized_distance(&xi_a, &xi_b);
+            let xi_xi = to_distance(xi_signature_similarity(&xi_a, &xi_b)?);
             return Ok((((sim_xi + xi_xi) / 2.0) * xi_weight).clamp(0.0, 1.0));
         }
 
@@ -372,7 +494,7 @@ impl ConsciousnessMetrics {
         let mut similarities = Vec::new();
         for i in 0..n {
             for j in (i + 1)..n {
-                let sim = cosine_similarity(vectors[i], vectors[j]);
+                let sim = try_cosine_similarity(vectors[i], vectors[j])?;
                 sim_sum += sim;
                 similarities.push(sim);
                 count += 1;
@@ -400,7 +522,7 @@ impl ConsciousnessMetrics {
         let mut xi_count = 0usize;
         for i in 0..n {
             for j in (i + 1)..n {
-                let sim = cosine_similarity(&xi_sigs[i], &xi_sigs[j]);
+                let sim = xi_signature_similarity(&xi_sigs[i], &xi_sigs[j])?;
                 xi_sim_sum += sim;
                 xi_similarities.push(sim);
                 xi_count += 1;
@@ -435,6 +557,9 @@ impl ConsciousnessMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Tests still exercise the lossy helper directly — it remains public
+    // API and its documented sentinel behaviour needs covering.
+    use crate::wave::cosine_similarity;
 
     #[test]
     fn rotation_matrix_works() {
@@ -640,6 +765,134 @@ mod tests {
         let c = vec![1.0f32, 1.0];
         let err = ConsciousnessMetrics::compute_differentiation_xi(&[&a, &c, &b], 1.0).unwrap_err();
         assert!(matches!(err, XiError::MixedDimensions { index: 2, .. }));
+    }
+
+    #[test]
+    fn zero_magnitude_vector_is_an_error_not_maximal_differentiation() {
+        // #67 — the sharpest form of the bug. A zero vector scored 0.0
+        // against every peer under the lossy path, which reads as
+        // "orthogonal to everything", i.e. maximal differentiation. So a
+        // corpus containing an empty embedding did not merely lose
+        // information — it reported INFLATED Xi.
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![0.0f32, 1.0, 0.0];
+        let zero = vec![0.0f32, 0.0, 0.0];
+
+        let err =
+            ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b, &zero], 1.0).unwrap_err();
+        assert_eq!(
+            err,
+            XiError::Incomparable(VectorCompareError::ZeroMagnitude)
+        );
+
+        // Anti-vacuous: the same batch without the zero vector is fine, so
+        // this is rejecting the zero vector specifically and not the shape.
+        let c = vec![0.0f32, 0.0, 1.0];
+        assert!(ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b, &c], 1.0).is_ok());
+    }
+
+    #[test]
+    fn zero_xi_signature_is_tolerated_not_an_error() {
+        // A zero *embedding* is caller error; a zero *Xi signature* is not.
+        // compute_xi_signature returns the zero vector whenever the
+        // nonlinear commutator cancels, which happens for ordinary
+        // axis-aligned input — so propagating ZeroMagnitude from the Xi
+        // pass would reject perfectly normal corpora. (#67)
+        let axis = vec![1.0f32, 0.0];
+        let sig = compute_xi_signature(&axis);
+        assert!(
+            sig.iter().all(|x| *x == 0.0),
+            "precondition: [1,0] has a zero Xi signature, got {sig:?}"
+        );
+
+        // Batches built entirely from such vectors must still compute.
+        let a = vec![1.0f32, 0.0];
+        let b = vec![0.0f32, 1.0];
+        assert!(ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b], 1.0).is_ok());
+
+        let c = vec![1.0f32, 1.0];
+        let d = vec![1.0f32, 2.0];
+        assert!(
+            ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b, &c, &d], 1.0).is_ok(),
+            "the n >= 3 path must tolerate zero Xi signatures too"
+        );
+    }
+
+    #[test]
+    fn non_finite_embedding_is_an_error() {
+        // Same class: a NaN-bearing embedding used to score 0.0 against
+        // every peer rather than being surfaced. (#67)
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![0.0f32, 1.0, 0.0];
+        let bad = vec![f32::NAN, 0.0, 0.0];
+        let err =
+            ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b, &bad], 1.0).unwrap_err();
+        assert_eq!(err, XiError::Incomparable(VectorCompareError::NonFinite));
+    }
+
+    #[test]
+    fn two_vector_path_also_rejects_incomparable_pairs() {
+        // The n == 2 branch takes a different code path from the n >= 3
+        // loops, so it needs its own coverage. (#67)
+        let a = vec![1.0f32, 0.0];
+        let zero = vec![0.0f32, 0.0];
+        assert_eq!(
+            ConsciousnessMetrics::compute_differentiation_xi(&[&a, &zero], 1.0).unwrap_err(),
+            XiError::Incomparable(VectorCompareError::ZeroMagnitude)
+        );
+        // Anti-vacuous: an ordinary pair still succeeds on that path.
+        let b = vec![0.0f32, 1.0];
+        assert!(ConsciousnessMetrics::compute_differentiation_xi(&[&a, &b], 1.0).is_ok());
+    }
+
+    #[test]
+    fn xi_repulsive_force_checked_form_catches_mismatch() {
+        // #67 — the lossy form's 0.0 means "no repulsion", i.e. IDENTICAL.
+        // A dimension mismatch therefore fails toward "these are the same
+        // thing", the most misleading answer available.
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![1.0f32, 0.0];
+
+        assert_eq!(
+            xi_repulsive_force(&a, &b),
+            0.0,
+            "documented lossy behaviour: reads as identical"
+        );
+        assert_eq!(
+            try_xi_repulsive_force(&a, &b),
+            Err(VectorCompareError::LengthMismatch { a: 3, b: 2 })
+        );
+
+        // Anti-vacuous: genuinely identical signatures are Ok(0.0), which is
+        // exactly the value the mismatch used to forge.
+        assert_eq!(try_xi_repulsive_force(&a, &a), Ok(0.0));
+        // And distinct signatures still produce real repulsion.
+        let c = vec![0.0f32, 1.0, 0.0];
+        assert!(try_xi_repulsive_force(&a, &c).unwrap() > 0.0);
+    }
+
+    #[test]
+    fn xi_signature_try_repulsive_force_surfaces_mismatch() {
+        let short = XiSignature::compute(&[1.0, 0.5]);
+        let long = XiSignature::compute(&[1.0, 0.5, 0.3, 0.2]);
+        assert!(short.try_repulsive_force(&long).is_err());
+        assert_eq!(short.repulsive_force(&long), 0.0, "lossy form unchanged");
+        // Anti-vacuous: matching signatures compare fine.
+        assert!(short.try_repulsive_force(&short).is_ok());
+    }
+
+    #[test]
+    fn diversity_boost_returns_base_unchanged_for_incomparable_signatures() {
+        // Now documented policy rather than an accident of 0.0 falling
+        // through both tier thresholds. (#67)
+        let a = vec![1.0f32, 0.0, 0.0];
+        let b = vec![1.0f32, 0.0];
+        for base in [0.0, 0.2, 0.5, 0.9_f32] {
+            assert!(
+                (xi_diversity_boost(base, &a, &b) - base).abs() < 1e-6,
+                "no diversity signal → no adjustment, for base={base}"
+            );
+        }
     }
 
     #[test]

@@ -95,7 +95,7 @@ Pure library — `default = ["std"]`, with feature flags for `serde`, optional `
 
 ```toml
 [dependencies]
-consciousness-core = { version = "0.5", features = ["serde"] }
+consciousness-core = { version = "0.6", features = ["serde"] }
 ```
 
 ```rust
@@ -131,7 +131,7 @@ This snippet is compiled as a test — see `readme_kuramoto_example_compiles` in
 ### `no_std`
 
 ```toml
-consciousness-core = { version = "0.5", default-features = false }
+consciousness-core = { version = "0.6", default-features = false }
 ```
 
 Transcendental math routes through `libm` and `vec!` comes from `alloc`, so the

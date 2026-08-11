@@ -7,6 +7,65 @@ from 0.2.0 forward.
 
 ---
 
+## [0.6.0] — 2026-08-11
+
+Closes the "incomparable reads as orthogonal" class at the wave layer (#67).
+**Additive and non-breaking** for existing signatures; the minor bump is for
+the new public API and the changed documented policy.
+
+### Added
+- `wave::VectorCompareError` — `LengthMismatch { a, b }`, `Empty`,
+  `ZeroMagnitude`, `NonFinite`. Implements `Display`, and
+  `std::error::Error` under `std`.
+- `wave::try_cosine_similarity` — checked cosine similarity. The lossy
+  `cosine_similarity` returned `0.0` for **four** distinct undefined
+  conditions as well as for genuine orthogonality, so a caller could not
+  tell a real measurement from a rejected input.
+- `metrics::try_xi_repulsive_force` and
+  `XiSignature::try_repulsive_force` — checked repulsion. The lossy form is
+  worse than the cosine case: its `0.0` means *no repulsion*, so
+  incomparable signatures read as **identical**.
+- `XiError::Incomparable(VectorCompareError)`, and
+  `From<VectorCompareError> for XiError`.
+
+### Changed
+- `compute_differentiation_xi` now rejects zero-magnitude and non-finite
+  embeddings with `XiError::Incomparable`. This is the sharpest form of the
+  bug: a zero vector scored `0.0` against every peer, which reads as
+  *orthogonal to everything*, i.e. maximal differentiation — so a corpus
+  containing an empty embedding did not merely lose information, it
+  reported **inflated** Xi.
+- `XiError` is now `#[non_exhaustive]`, so future variants are not a
+  breaking change. Introduced in 0.5.0 the day before, so no downstream
+  match should exist yet.
+- `xi_diversity_boost` returning `base_similarity` unchanged for
+  incomparable signatures is now documented policy ("no diversity signal,
+  so no adjustment") rather than an accident of `0.0` falling through both
+  tier thresholds. Numeric behaviour is unchanged.
+- Production code in `metrics.rs` uses only the checked forms. The lossy
+  helpers remain public and unchanged for downstream hot paths.
+
+### Notes
+- `compute_xi_signature` legitimately returns the **zero vector** whenever
+  the nonlinear commutator cancels, which happens for ordinary axis-aligned
+  input (`[1, 0]` suffices). So Xi-signature comparison tolerates
+  `ZeroMagnitude` (mapping it to `0.0`) while raw-embedding comparison
+  propagates it. Propagating from both would reject perfectly normal
+  corpora.
+- Known wart, deliberately preserved and documented on
+  `xi_signature_similarity`: a structureless signature scoring `0.0`
+  against its peers reads as "maximally different in Xi" and nudges
+  `xi_variance` up — the same inflation shape this release removes for raw
+  embeddings. Arguably two structureless signatures should score `1.0`.
+  Changing it would silently recalibrate Xi for every axis-aligned corpus,
+  the same cost that kept #35 piecewise, so it is left for an explicit
+  decision rather than folded into a hardening pass.
+- No `debug_assert!` was added to the lossy helpers. It would turn a silent
+  wrong number into a panic in every downstream *debug* build — a
+  behaviour change imposed on consumers, not a hardening.
+
+---
+
 ## [0.5.0] — 2026-08-10
 
 Metric-semantics decisions. Four open questions about what these numbers
