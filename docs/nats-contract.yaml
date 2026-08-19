@@ -187,8 +187,18 @@ KANNAKA.dreams:
     - ts
     - agent_id
     - cluster_id
-    - centroid
   optional:
+    # centroid moved required -> optional (kannaka-memory#703). Two reasons,
+    # and the second is the real one:
+    #   1. size — a full wave-memory centroid is WAVEFRONT_DIM floats, and at
+    #      large dims a batch of top-25 cluster snapshots brushes NATS's
+    #      default 1 MB payload cap;
+    #   2. meaning — HRM encodings are PER-AGENT (each agent's encoder maps
+    #      content into its own wave space; divergence is by design). An
+    #      absorbing agent cannot use a foreign centroid: it re-encodes the
+    #      exemplar's CONTENT into its own space. The centroid was never the
+    #      interchange payload — content + content_hash is.
+    - centroid
     - amplitude
     - importance
     - tags
